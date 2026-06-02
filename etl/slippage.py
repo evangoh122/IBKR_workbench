@@ -162,10 +162,9 @@ def _ibkr_stock_commission(shares: float, price: float,
             rate = tier_rate
             break
 
-    per_leg = max(
-        IBKR_STOCK_MIN,
-        min(shares * rate + shares * IBKR_STOCK_REG_FEE,
-            price * shares * IBKR_STOCK_MAX_PCT)
+    per_leg = min(
+        max(IBKR_STOCK_MIN, shares * rate + shares * IBKR_STOCK_REG_FEE),
+        price * shares * IBKR_STOCK_MAX_PCT,
     )
     return per_leg * 2   # round-trip
 

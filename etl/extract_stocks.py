@@ -36,8 +36,11 @@ def run_stock_etl(client: IBKRClient, tickers: List[str]) -> int:
         contract = client.make_stock_contract(ticker)
         ev = threading.Event()
         req_id = client.request_snapshot(contract, on_done)
-        done_evts[req_id] = ev
-        req_map[req_id]   = ticker
+        with lock:
+            done_evts[req_id] = ev
+            if req_id in results:   # callback already fired before we registered
+                ev.set()
+        req_map[req_id] = ticker
         logger.debug(f"Requested snapshot req={req_id} ticker={ticker}")
 
     # Wait for all (max 15 s per ticker)

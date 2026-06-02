@@ -4,6 +4,7 @@ Two-phase options ETL:
   1. Discover / refresh option chain metadata (expiries + strikes)
   2. Pull live quotes + Greeks for selected contracts
 """
+import os
 import threading
 from datetime import datetime, timezone
 from typing import List
@@ -16,7 +17,7 @@ from config.tickers import get_expiry_cycles
 
 
 # How many nearest expiries to actually quote (chain discovery returns all)
-DEFAULT_EXPIRY_CYCLES = int(__import__("os").getenv("OPTIONS_EXPIRY_CYCLES", 2))
+DEFAULT_EXPIRY_CYCLES = int(os.getenv("OPTIONS_EXPIRY_CYCLES", 2))
 
 
 # ── Phase 1: Chain Discovery ──────────────────────────────────────────────────
@@ -125,13 +126,16 @@ def run_option_etl(client: IBKRClient, tickers: List[str],
             contract = client.make_option_contract(ticker, expiry, strike, right)
             ev       = threading.Event()
             req_id   = client.request_snapshot(contract, on_done)
-            done_evts[req_id] = ev
+            with lock:
+                done_evts[req_id] = ev
+                if req_id in results:   # callback already fired before we registered
+                    ev.set()
             batch_reqs[req_id] = (ticker, expiry, strike, right)
             meta[req_id] = (ticker, expiry, strike, right)
 
         # Wait for batch
-        for req_id, ev in batch_reqs.items():
-            ev.wait(timeout=15)
+        for req_id in batch_reqs:
+            done_evts[req_id].wait(timeout=15)
 
         # Collect rows from this batch
         for req_id, (ticker, expiry, strike, right) in batch_reqs.items():

@@ -8,11 +8,12 @@ from typing import Dict, List, Tuple
 
 import yaml
 
-YAML_PATH = os.getenv("TICKERS_YAML", str(Path(__file__).parent / "tickers.yaml"))
+_DEFAULT_YAML = str(Path(__file__).parent / "tickers.yaml")
 
 
 def load_config() -> dict:
-    with open(YAML_PATH, "r") as f:
+    path = os.getenv("TICKERS_YAML", _DEFAULT_YAML)
+    with open(path, "r") as f:
         return yaml.safe_load(f)
 
 

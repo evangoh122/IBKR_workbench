@@ -50,9 +50,9 @@ def test_stock_commission_minimum():
 
 
 def test_stock_commission_rate():
-    # 1000 shares at tier 1 rate $0.0035/share
+    # 1000 shares at tier 1 rate $0.0035/share + $0.000008 reg fee
     cost = _ibkr_stock_commission(shares=1000, price=100.0)
-    per_leg = 1000 * 0.0035
+    per_leg = 1000 * (0.0035 + 0.000008)
     assert cost == pytest.approx(per_leg * 2)
 
 
@@ -79,9 +79,10 @@ def test_option_commission_scales():
 # ── Market impact tests ───────────────────────────────────────────────────────
 
 def test_market_impact_zero_for_tiny_trade():
-    # 10 shares in 10M ADV stock → very small impact
+    # 10 shares in 10M ADV: participation=1e-6, impact_pct=0.015*1e-3=1.5e-5
+    # dollar impact = 1.5e-5 * 10*100 * 2 = $0.03  (small but > 1¢)
     impact = _market_impact_stock(shares=10, price=100.0, adv=10_000_000)
-    assert impact < 0.01   # less than 1 cent
+    assert impact < 0.10   # less than 10 cents for a tiny trade
 
 
 def test_market_impact_larger_for_big_trade():
@@ -91,11 +92,12 @@ def test_market_impact_larger_for_big_trade():
 
 
 def test_market_impact_sqrt_scaling():
-    # Doubling quantity should increase impact by ~sqrt(2)
+    # Model: impact = sigma * sqrt(Q/ADV) * Q * price * 2  → scales as Q^1.5
+    # 4× quantity → 4^1.5 = 8× impact
     i1 = _market_impact_stock(shares=10_000, price=100.0, adv=1_000_000)
     i2 = _market_impact_stock(shares=40_000, price=100.0, adv=1_000_000)
     ratio = i2 / i1
-    assert ratio == pytest.approx(2.0, rel=0.05)   # sqrt(4) = 2
+    assert ratio == pytest.approx(8.0, rel=0.05)   # 4^1.5 = 8
 
 
 # ── Toggle tests ──────────────────────────────────────────────────────────────
