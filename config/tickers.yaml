@@ -17,7 +17,7 @@ groups:
       - AMZN    # Amazon
       - META    # Meta
       - TSLA    # Tesla
-      - BRK.B   # Berkshire Hathaway B
+      - BRK B   # Berkshire Hathaway B (IBKR uses space, not dot)
       - JPM     # JPMorgan Chase
       - V       # Visa
 

@@ -68,6 +68,10 @@ class IBKRClient(EWrapper, EClient):
         self._chain_results: Dict[int, list] = {}
         self._chain_done:    Dict[int, threading.Event] = {}
 
+        # Contract detail results (used to resolve conId before chain requests)
+        self._detail_results: Dict[int, list] = {}
+        self._detail_done:    Dict[int, threading.Event] = {}
+
     # ── Connection helpers ────────────────────────────────────────────────────
 
     def next_req_id(self) -> int:
@@ -154,6 +158,15 @@ class IBKRClient(EWrapper, EClient):
             snap = self._snapshots.get(reqId, {})
             cb(reqId, snap)
 
+    # Contract detail callbacks (used to resolve conId)
+    def contractDetails(self, reqId, contractDetails):
+        self._detail_results.setdefault(reqId, []).append(contractDetails)
+
+    def contractDetailsEnd(self, reqId):
+        ev = self._detail_done.get(reqId)
+        if ev:
+            ev.set()
+
     # Option chain callbacks
     def securityDefinitionOptionParameter(
         self, reqId, exchange, underlyingConId,
@@ -209,18 +222,39 @@ class IBKRClient(EWrapper, EClient):
         self.reqMktData(req_id, contract, "", True, False, [])
         return req_id
 
+    def resolve_con_id(self, ticker: str, timeout: int = 10) -> int:
+        """Resolve a ticker's conId via reqContractDetails. Returns 0 on failure."""
+        contract = self.make_stock_contract(ticker)
+        req_id = self.next_req_id()
+        done_event = threading.Event()
+        self._detail_results[req_id] = []
+        self._detail_done[req_id]    = done_event
+
+        self.reqContractDetails(req_id, contract)
+        done_event.wait(timeout=timeout)
+
+        results = self._detail_results.pop(req_id, [])
+        self._detail_done.pop(req_id, None)
+        if results:
+            return results[0].contract.conId
+        logger.warning(f"Could not resolve conId for {ticker}")
+        return 0
+
     def request_option_chain(self, ticker: str,
                               timeout: int = 30) -> list:
         """
         Synchronously fetch all option chain parameters for a ticker.
+        Resolves the underlying conId first — required by some TWS versions.
         Returns list of (exchange, expiry, strike, right) tuples.
         """
+        con_id = self.resolve_con_id(ticker)
+
         req_id = self.next_req_id()
         done_event = threading.Event()
         self._chain_results[req_id] = []
         self._chain_done[req_id]    = done_event
 
-        self.reqSecDefOptParams(req_id, ticker, "", "STK", 0)
+        self.reqSecDefOptParams(req_id, ticker, "", "STK", con_id)
         done_event.wait(timeout=timeout)
 
         results = self._chain_results.pop(req_id, [])
