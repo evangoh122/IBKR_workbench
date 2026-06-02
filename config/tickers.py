@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple
 
 import yaml
 
-YAML_PATH = os.getenv("TICKERS_YAML", str(Path(__file__).parent.parent / "tickers.yaml"))
+YAML_PATH = os.getenv("TICKERS_YAML", str(Path(__file__).parent / "tickers.yaml"))
 
 
 def load_config() -> dict:

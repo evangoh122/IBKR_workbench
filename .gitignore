@@ -44,5 +44,9 @@ Thumbs.db
 # Streamlit cache
 .streamlit/
 
+# Knowledge Graph
+graphify-out/
+.planning/graphs/
+
 # Jupyter
 .ipynb_checkpoints/
