@@ -1,0 +1,72 @@
+# tickers.yaml
+# Define your stock universe here.
+# The ETL reads from this file instead of the .env STOCK_TICKERS variable.
+#
+# Groups are purely for organisation — all tickers across all groups are processed.
+# You can add/remove tickers without touching any code.
+
+groups:
+
+  mega_cap:
+    description: "Mega-cap US equities"
+    tickers:
+      - AAPL    # Apple
+      - MSFT    # Microsoft
+      - NVDA    # Nvidia
+      - GOOGL   # Alphabet A
+      - AMZN    # Amazon
+      - META    # Meta
+      - TSLA    # Tesla
+      - BRK.B   # Berkshire Hathaway B
+      - JPM     # JPMorgan Chase
+      - V       # Visa
+
+  etfs:
+    description: "Index & sector ETFs"
+    tickers:
+      - SPY     # S&P 500
+      - QQQ     # Nasdaq 100
+      - IWM     # Russell 2000
+      - DIA     # Dow Jones
+      - GLD     # Gold
+      - TLT     # 20yr Treasury
+      - XLF     # Financials
+      - XLK     # Technology
+      - XLE     # Energy
+      - XLV     # Healthcare
+
+  semiconductors:
+    description: "Semiconductor stocks"
+    tickers:
+      - AMD
+      - INTC
+      - QCOM
+      - AVGO
+      - MU
+      - AMAT
+      - LRCX
+      - KLAC
+      - TXN
+      - MRVL
+
+  watchlist:
+    description: "Personal watchlist — edit freely"
+    tickers:
+      - COIN
+      - PLTR
+      - SOFI
+      - HOOD
+
+# ── Options config per ticker (optional overrides) ────────────────────────────
+# If a ticker is not listed here, it uses OPTIONS_EXPIRY_CYCLES from .env
+options_config:
+  SPY:
+    expiry_cycles: 1    # SPY has huge chains — limit to nearest expiry
+  QQQ:
+    expiry_cycles: 1
+  IWM:
+    expiry_cycles: 1
+  AAPL:
+    expiry_cycles: 2
+  TSLA:
+    expiry_cycles: 2
