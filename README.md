@@ -8,11 +8,11 @@ A full-stack quantitative research platform — live market data from **Interact
 
 | Layer | What's built |
 |---|---|
-| **Data ingestion** | ETL pipeline pulling from IBKR TWS, Polygon.io, SEC EDGAR, and Finviz |
-| **Storage** | DuckDB (`ibkr.duckdb`) — 13 tables covering equities, options, forex, futures, indices |
+| **Data ingestion** | ETL pipeline pulling from IBKR TWS, Polygon.io, SEC EDGAR, Finviz, and **CFTC COT** |
+| **Storage** | DuckDB (`ibkr.duckdb`) — 14 tables covering equities, options, forex, futures, indices, and COT |
 | **Vector search** | DuckDB VSS (`vectors.duckdb`) — HNSW index on 384-dim ticker embeddings |
-| **Dashboard** | Streamlit + Plotly — 8 pages including candlestick charts, options chain, cost calculator |
-| **AI chat** | Text-to-SQL (DeepSeek/OpenAI/Claude/Ollama) + RAG over EDGAR financials |
+| **Dashboard** | Streamlit + Plotly — 8 pages including candlestick charts, options chain, and COT positioning |
+| **AI chat** | Text-to-SQL (**DeepSeek / Xiaomi MiMo**) + RAG over EDGAR financials |
 | **Deployment** | Docker Compose — separate dashboard and ETL containers |
 
 ---
@@ -30,6 +30,7 @@ Polygon.io    ────────► extract_polygon.py ─────► 
                ────────►   option snapshots ─────►   polygon_option_snapshots
                ────────►   reference        ─────►   polygon_tickers / snapshots
 SEC EDGAR     ────────► extract_edgar.py   ─────►   edgar_filings / edgar_facts
+CFTC COT      ────────► extract_cot.py     ─────►   cot_reports
 Finviz        ────────► update_tickers.py  ─────► config/tickers.yaml (11k+ tickers)
                                                  ┌────────────────────────────────┐
                                                  │  vectors.duckdb                │
@@ -39,7 +40,7 @@ embed_tickers.py ─────────────────────
 Interfaces
 ──────────
 ibkr.duckdb ──► Streamlit Dashboard (8 pages, Plotly charts)
-            ──► chat_engine.py  (Text-to-SQL via DeepSeek / OpenAI / Claude / Ollama)
+            ──► chat_engine.py  (Text-to-SQL via DeepSeek / Xiaomi MiMo)
 vectors.duckdb ► rag_engine.py  (LangChain RAG — EDGAR + descriptions)
 query.py    ──► Python API (latest_stock_quotes, stock_history, etl_run_log…)
 ```
@@ -53,7 +54,7 @@ query.py    ──► Python API (latest_stock_quotes, stock_history, etl_run_lo
 | Python 3.11+ | |
 | TWS or IB Gateway | For live IBKR data only — all other jobs work without it |
 | Polygon.io API key | Free tier: 5 req/min; Starter $29/mo for full speed |
-| DeepSeek / OpenAI / Anthropic key | For the AI chat interface |
+| DeepSeek / Xiaomi key | For the AI chat interface |
 | Docker (optional) | For containerised deployment |
 
 ---
@@ -66,7 +67,7 @@ pip install -r requirements.txt
 
 # 2. Configure
 cp .env.example .env
-# Fill in: POLYGON_API_KEY, DEEPSEEK_API_KEY (or other provider)
+# Fill in: POLYGON_API_KEY, DEEPSEEK_API_KEY (or set CHAT_PROVIDER=mimo for Xiaomi)
 
 # 3. Fetch 11,000+ US tickers from Finviz
 python -m config.update_tickers
@@ -118,13 +119,11 @@ docker compose up --build
 ### AI Chat
 | Variable | Default | Description |
 |---|---|---|
-| `CHAT_PROVIDER` | `deepseek` | `deepseek` / `mimo` / `openai` / `anthropic` / `ollama` |
+| `CHAT_PROVIDER` | `deepseek` | `deepseek` / `mimo` |
 | `CHAT_MODEL` | *(provider default)* | Override model name |
 | `DEEPSEEK_API_KEY` | | platform.deepseek.com |
-| `OPENAI_API_KEY` | | platform.openai.com |
-| `ANTHROPIC_API_KEY` | | console.anthropic.com |
-| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Local Ollama endpoint |
-| `OLLAMA_MODEL` | `llama3.2` | Any model pulled via `ollama pull` |
+| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Local Ollama endpoint for Xiaomi MiMo |
+| `OLLAMA_MODEL` | `xiaomi/MiMo-7B-RL` | Xiaomi model pulled via `ollama pull` |
 
 ### Storage
 | Variable | Default | Description |
@@ -149,6 +148,9 @@ python main.py --job polygon              # all polygon jobs
 # ── SEC EDGAR (no API key needed) ─────────────────────────────────────────────
 python main.py --job edgar-filings        # 10-K / 10-Q / 8-K filing history
 python main.py --job edgar-facts          # XBRL financials (revenue, EPS, assets…)
+
+# ── CFTC COT (no API key needed) ──────────────────────────────────────────────
+python main.py --job cot                  # Commitments of Traders (Legacy Futures)
 
 # ── AI / Vector search ────────────────────────────────────────────────────────
 python main.py --job embed-tickers        # embed ticker descriptions → HNSW index
@@ -181,7 +183,7 @@ streamlit run dashboard/app.py
 | 📦 **Polygon OHLCV** | Full-history daily bars with VWAP overlay and period return stats |
 | 🔗 **Options Chain** | IV smile, Greeks heatmap, OI/volume charts, full chain table |
 | 💸 **Cost Calculator** | Round-trip slippage model — spread + IBKR commission + market impact |
-| 🩺 **ETL Health** | Job run log, row counts per table, data freshness per ticker |
+| 🩺 **ETL Health** | Job run log, row counts per table, data freshness per ticker (including COT) |
 | ℹ️ **About** | Platform overview, data source status, quick reference |
 
 ---
@@ -202,7 +204,7 @@ Two modes available on the Chat page:
 
 Switch providers with one line in `.env`:
 ```
-CHAT_PROVIDER=deepseek   # or: openai | anthropic | mimo | ollama
+CHAT_PROVIDER=deepseek   # or: mimo
 ```
 
 ---
@@ -221,12 +223,13 @@ CHAT_PROVIDER=deepseek   # or: openai | anthropic | mimo | ollama
 | FX futures | 6E, 6B, 6J, 6C, 6A, 6S, 6N | CME |
 | Crypto futures | BTC, ETH, MBT, MET | CME |
 | Cash indices | SPX, VIX, NDX, RUT, DJX + global | CBOE |
+| **COT Positioning** | All major futures above (Legacy) | CFTC |
 
 ---
 
 ## Database Schema
 
-All data in `data/ibkr.duckdb` (13 tables):
+All data in `data/ibkr.duckdb` (14 tables):
 
 | Table | Rows (approx) | Description |
 |---|---|---|
@@ -240,6 +243,7 @@ All data in `data/ibkr.duckdb` (13 tables):
 | `polygon_tickers` | ~11k | Reference — name, exchange, description |
 | `edgar_filings` | varies | 10-K / 10-Q / 8-K filing history |
 | `edgar_facts` | varies | XBRL facts — revenue, EPS, assets, equity |
+| `cot_reports` | weekly | CFTC Commitments of Traders (Legacy Futures Only) |
 | `ticker_embeddings` | ~11k | 384-dim sentence embeddings (HNSW) |
 | `edgar_embeddings` | optional | EDGAR filing text embeddings |
 | `etl_runs` | grows | Audit log of every ETL job |
