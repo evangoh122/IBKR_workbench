@@ -45,9 +45,19 @@ POLL_SECS     = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
 LOG_LEVEL     = os.getenv("LOG_LEVEL", "INFO")
 EXPIRY_CYCLES = int(os.getenv("OPTIONS_EXPIRY_CYCLES", "2"))
 
-POLYGON_TIMESPAN         = os.getenv("POLYGON_BARS_TIMESPAN", "day")
-POLYGON_LOOKBACK         = int(os.getenv("POLYGON_BARS_LOOKBACK", "9500"))
+POLYGON_TIMESPAN          = os.getenv("POLYGON_BARS_TIMESPAN", "day")
+POLYGON_LOOKBACK          = int(os.getenv("POLYGON_BARS_LOOKBACK", "9500"))
 POLYGON_OPT_MAX_CONTRACTS = int(os.getenv("POLYGON_OPTION_BARS_MAX_CONTRACTS", "250"))
+
+# Optional watchlist override — set POLYGON_TICKERS=SPY,AAPL,... in .env
+# to limit ALL polygon jobs to a specific subset (essential for the free tier)
+_poly_watchlist = os.getenv("POLYGON_TICKERS", "")
+if _poly_watchlist:
+    _want = {s.strip().upper() for s in _poly_watchlist.split(",")}
+    POLYGON_TICKERS = [t for t in TICKERS if t.get("symbol", "").upper() in _want]
+    logger.info(f"POLYGON_TICKERS override active: {len(POLYGON_TICKERS)} tickers")
+else:
+    POLYGON_TICKERS = TICKERS
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logger.remove()
@@ -146,26 +156,26 @@ def _polygon_client_or_exit():
 @etl_job("polygon-bars")
 def job_polygon_bars():
     poly = _polygon_client_or_exit()
-    return run_polygon_bars_etl(poly, TICKERS, POLYGON_TIMESPAN, POLYGON_LOOKBACK)
+    return run_polygon_bars_etl(poly, POLYGON_TICKERS, POLYGON_TIMESPAN, POLYGON_LOOKBACK)
 
 
 @etl_job("polygon-quotes")
 def job_polygon_snapshots():
     poly = _polygon_client_or_exit()
-    return run_polygon_snapshots_etl(poly, TICKERS)
+    return run_polygon_snapshots_etl(poly, POLYGON_TICKERS)
 
 
 @etl_job("polygon-options")
 def job_polygon_options():
     poly = _polygon_client_or_exit()
-    return run_polygon_options_etl(poly, TICKERS)
+    return run_polygon_options_etl(poly, POLYGON_TICKERS)
 
 
 @etl_job("polygon-option-bars")
 def job_polygon_option_bars():
     poly = _polygon_client_or_exit()
     return run_polygon_option_bars_etl(
-        poly, TICKERS,
+        poly, POLYGON_TICKERS,
         timespan=POLYGON_TIMESPAN,
         lookback_days=POLYGON_LOOKBACK,
         max_contracts=POLYGON_OPT_MAX_CONTRACTS,
@@ -175,7 +185,7 @@ def job_polygon_option_bars():
 @etl_job("polygon-ref")
 def job_polygon_reference():
     poly = _polygon_client_or_exit()
-    return run_polygon_reference_etl(poly, TICKERS)
+    return run_polygon_reference_etl(poly, POLYGON_TICKERS)
 
 
 def job_polygon_all():
