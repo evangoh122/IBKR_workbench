@@ -241,22 +241,31 @@ _RATE_DELAY = float(os.getenv("POLYGON_RATE_DELAY", "13"))
 
 
 def _polygon_ticker(t_def: dict) -> str:
-    """Normalize IBKR-style dictionary to polygon format."""
+    """
+    Convert an IBKR ticker dict to the polygon.io ticker format.
+
+    STK:  AAPL        → AAPL   (BRK B → BRK.B)
+    CASH: EUR.USD     → C:EURUSD
+    IND:  SPX         → I:SPX
+    FUT:  ES          → F:ES
+    """
+    if not isinstance(t_def, dict):
+        return str(t_def).strip().replace(" ", ".")
+
     sec_type = t_def.get("secType", "STK")
     symbol   = t_def.get("symbol", "").strip()
-    
+
     if sec_type == "CASH":
-        currency = t_def.get("currency", "USD")
-        return f"C:{symbol}{currency}"
-    elif sec_type == "IND":
-        return f"I:{symbol}"
-    elif sec_type == "FUT":
-        # For simplicity, if we don't have a contract month suffix, we just query the root. 
-        # But polygon typically requires the full F:ESU24 format. We assume symbol contains it if provided.
-        return f"F:{symbol}"
-    
-    # STK (Stocks/Equities) do not require a prefix in most Polygon endpoints, 
-    # but we normalize BRK B to BRK.B
+        # EUR.USD → EURUSD  (strip the dot separator polygon doesn't use)
+        return "C:" + symbol.replace(".", "")
+
+    if sec_type == "IND":
+        return "I:" + symbol
+
+    if sec_type == "FUT":
+        return "F:" + symbol
+
+    # STK default — normalise IBKR space to polygon dot (e.g. BRK B → BRK.B)
     return symbol.replace(" ", ".")
 
 

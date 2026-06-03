@@ -1,4 +1,126 @@
 groups:
+  forex_majors:
+    description: Major FX pairs
+    secType: CASH
+    exchange: IDEALPRO
+    tickers:
+    - EUR.USD
+    - GBP.USD
+    - USD.JPY
+    - USD.CHF
+    - AUD.USD
+    - USD.CAD
+    - NZD.USD
+  forex_minors:
+    description: Minor FX pairs
+    secType: CASH
+    exchange: IDEALPRO
+    tickers:
+    - EUR.GBP
+    - EUR.JPY
+    - EUR.AUD
+    - EUR.CAD
+    - EUR.CHF
+    - GBP.JPY
+    - GBP.AUD
+    - AUD.JPY
+    - AUD.NZD
+    - CAD.JPY
+  indices_us:
+    description: US cash indices
+    secType: IND
+    exchange: CBOE
+    tickers:
+    - SPX
+    - VIX
+    - NDX
+    - RUT
+    - DJX
+  indices_global:
+    description: Global cash indices
+    secType: IND
+    exchange: CBOE
+    tickers:
+    - HSI
+    - N225
+    - GDAXI
+    - FTSE
+    - CAC40
+  futures_equity:
+    description: Equity index futures (CME)
+    secType: FUT
+    exchange: CME
+    tickers:
+    - ES
+    - NQ
+    - RTY
+    - YM
+    - MES
+    - MNQ
+  futures_energy:
+    description: Energy futures (NYMEX)
+    secType: FUT
+    exchange: NYMEX
+    tickers:
+    - CL
+    - NG
+    - RB
+    - HO
+    - BZ
+  futures_metals:
+    description: Metals futures (COMEX)
+    secType: FUT
+    exchange: COMEX
+    tickers:
+    - GC
+    - SI
+    - HG
+    - PL
+    - PA
+  futures_rates:
+    description: Interest rate futures (CBOT)
+    secType: FUT
+    exchange: CBOT
+    tickers:
+    - ZB
+    - ZN
+    - ZF
+    - ZT
+    - ZQ
+  futures_ag:
+    description: Agricultural futures (CBOT)
+    secType: FUT
+    exchange: CBOT
+    tickers:
+    - ZC
+    - ZS
+    - ZW
+    - ZL
+    - ZM
+    - KE
+    - ZO
+    - ZR
+  futures_fx:
+    description: FX futures (CME)
+    secType: FUT
+    exchange: CME
+    tickers:
+    - 6E
+    - 6B
+    - 6J
+    - 6C
+    - 6A
+    - 6S
+    - 6N
+  futures_crypto:
+    description: Crypto futures (CME)
+    secType: FUT
+    exchange: CME
+    tickers:
+    - BTC
+    - ETH
+    - MBT
+    - MET
   advertising_agencies:
     tickers:
     - ACCS
@@ -11578,7 +11700,7 @@ groups:
     - WM
     - YDDL
   watchlist:
-    description: "Personal watchlist \xE2\u20AC\u201D edit freely"
+    description: Personal watchlist — edit freely
     tickers:
     - COIN
     - PLTR

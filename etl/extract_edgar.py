@@ -43,6 +43,12 @@ def _symbol(t) -> str:
     return t["symbol"] if isinstance(t, dict) else str(t)
 
 
+def _stk_only(tickers) -> list:
+    """Filter to equities only — EDGAR has no filings for forex, futures, or indices."""
+    return [t for t in tickers
+            if not isinstance(t, dict) or t.get("secType", "STK") == "STK"]
+
+
 def run_edgar_filings_etl(
     tickers,
     form_types: Optional[List[str]] = None,
@@ -58,7 +64,7 @@ def run_edgar_filings_etl(
     form_set = set(form_types)
     total    = 0
 
-    symbols  = [_symbol(t) for t in tickers]
+    symbols  = [_symbol(t) for t in _stk_only(tickers)]
     cik_map  = _build_cik_map(symbols)
 
     with get_connection() as conn:
@@ -121,7 +127,7 @@ def run_edgar_facts_etl(tickers) -> int:
     Only annual (10-K) and quarterly (10-Q) frames are stored.
     """
     total   = 0
-    symbols = [_symbol(t) for t in tickers]
+    symbols = [_symbol(t) for t in _stk_only(tickers)]
     cik_map = _build_cik_map(symbols)
 
     with get_connection() as conn:
