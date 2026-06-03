@@ -104,6 +104,22 @@ def etl_run_log(limit: int = 20) -> pd.DataFrame:
     return df
 
 
+# ── Vector Search helpers ─────────────────────────────────────────────────────
+
+def search_similar_tickers(query_vector: list, limit: int = 5) -> pd.DataFrame:
+    """Find tickers with similar embeddings using DuckDB VSS."""
+    with _conn() as conn:
+        # Cast vector to FLOAT[1536] array
+        df = conn.execute(f"""
+            SELECT ticker, industry, 
+                   array_distance(embedding, {query_vector}::FLOAT[1536]) as distance
+            FROM ticker_embeddings
+            ORDER BY distance
+            LIMIT ?
+        """, (limit,)).df()
+    return df
+
+
 # ── CLI summary ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

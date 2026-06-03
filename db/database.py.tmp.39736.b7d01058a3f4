@@ -14,13 +14,6 @@ DB_PATH = os.getenv("DB_PATH", "./data/ibkr.duckdb")
 def get_connection() -> duckdb.DuckDBPyConnection:
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     conn = duckdb.connect(DB_PATH)
-    # ── Extension Setup ───────────────────────────────────────────
-    try:
-        conn.execute("INSTALL vss;")
-        conn.execute("LOAD vss;")
-        conn.execute("SET hnsw_enable_experimental_persistence = true;")
-    except Exception as e:
-        logger.warning(f"Failed to load VSS extension: {e}")
     return conn
 
 
@@ -229,23 +222,5 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_edgar_facts_ticker
                 ON edgar_facts(ticker, concept, period_end)
         """)
-
-        # ── Vector Storage ────────────────────────────────────────────────────────
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS ticker_embeddings (
-                ticker      TEXT PRIMARY KEY,
-                industry    TEXT,
-                embedding   FLOAT[1536],   -- OpenAI / standard dimension
-                updated_at  TIMESTAMP DEFAULT now()
-            )
-        """)
-        try:
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_ticker_emb 
-                ON ticker_embeddings USING HNSW (embedding) 
-                WITH (metric = 'cosine')
-            """)
-        except Exception as e:
-            logger.warning(f"Failed to create HNSW index: {e}")
 
     logger.info(f"Database initialised at {DB_PATH}")
