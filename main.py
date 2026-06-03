@@ -68,6 +68,7 @@ from etl.extract_polygon import (
 from etl.embed_tickers import run_embed_tickers_etl
 from etl.extract_edgar import run_edgar_filings_etl, run_edgar_facts_etl
 from etl.embed_edgar import run_embed_edgar_etl
+from etl.extract_cot import run_cot_etl
 
 
 from functools import wraps
@@ -96,13 +97,19 @@ def etl_job(run_type: str):
             started = _utcnow()
             try:
                 rows = func(*args, **kwargs)
-                with get_connection() as conn:
+                conn = get_connection()
+                try:
                     _log_run(conn, run_type, "ok", f"{rows} rows", rows, started)
+                finally:
+                    conn.close()
                 return rows
             except Exception as e:
                 logger.error(f"{run_type.capitalize()} ETL failed: {e}")
-                with get_connection() as conn:
+                conn = get_connection()
+                try:
                     _log_run(conn, run_type, "error", str(e), 0, started)
+                finally:
+                    conn.close()
                 raise
         return wrapper
     return decorator
@@ -193,6 +200,11 @@ def job_embed_edgar():
     return run_embed_edgar_etl(TICKER_SYMBOLS)
 
 
+@etl_job("cot")
+def job_cot():
+    return run_cot_etl()
+
+
 def run_all(client: IBKRClient, refresh_chain: bool = False):
     if refresh_chain:
         logger.info("── Phase 1: Refreshing option chains ──")
@@ -215,7 +227,7 @@ def main():
                             "polygon", "polygon-bars", "polygon-quotes",
                             "polygon-options", "polygon-option-bars", "polygon-ref",
                             "embed-tickers", "embed-edgar",
-                            "edgar-filings", "edgar-facts",
+                            "edgar-filings", "edgar-facts", "cot",
                         ],
                         default="all")
     parser.add_argument("--schedule", action="store_true",
@@ -239,6 +251,7 @@ def main():
         "embed-edgar":     job_embed_edgar,
         "edgar-filings":   job_edgar_filings,
         "edgar-facts":     job_edgar_facts,
+        "cot":             job_cot,
     }
     if args.job in polygon_only_jobs:
         fn = polygon_only_jobs[args.job]

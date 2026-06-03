@@ -58,3 +58,6 @@ graphify-out/
 *.tmp.*
 _ticker_checkpoint.csv
 _ticker_checkpoint_page.txt
+
+# Audit files
+PROJECT_ERROR_AUDIT.yaml

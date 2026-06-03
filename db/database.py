@@ -26,7 +26,8 @@ def get_connection() -> duckdb.DuckDBPyConnection:
 
 def init_db():
     """Create all tables if they don't exist."""
-    with get_connection() as conn:
+    conn = get_connection()
+    try:
         # ── Stocks ────────────────────────────────────────────────────────────────
         conn.execute("""
             CREATE SEQUENCE IF NOT EXISTS stock_quotes_id_seq;
@@ -260,6 +261,29 @@ def init_db():
                 ON edgar_facts(ticker, concept, period_end)
         """)
 
+        # ── COT: Commitments of Traders (CFTC) ────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS cot_reports (
+                market_name     TEXT    NOT NULL,
+                ticker          TEXT,               -- Optional mapping to IBKR ticker
+                report_date     TEXT    NOT NULL,   -- ISO-8601
+                noncomm_long    INTEGER,
+                noncomm_short   INTEGER,
+                comm_long       INTEGER,
+                comm_short      INTEGER,
+                total_long      INTEGER,
+                total_short     INTEGER,
+                noncomm_spreads INTEGER,
+                open_interest   INTEGER,
+                created_at      TIMESTAMP DEFAULT now(),
+                UNIQUE(market_name, report_date)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_cot_market_date
+                ON cot_reports(market_name, report_date)
+        """)
+
         # ── Vector Storage ────────────────────────────────────────────────────────
         conn.execute("""
             CREATE TABLE IF NOT EXISTS ticker_embeddings (
@@ -299,5 +323,7 @@ def init_db():
             """)
         except Exception as e:
             logger.warning(f"Failed to create HNSW index on edgar_embeddings: {e}")
+    finally:
+        conn.close()
 
     logger.info(f"Database initialised at {DB_PATH}")
