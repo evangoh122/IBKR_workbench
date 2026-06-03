@@ -21,7 +21,12 @@ import argparse
 import os
 import sys
 import time
+import warnings
 from datetime import datetime, timezone
+
+# Suppress specific Python 3.14 / dependency warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="langchain_core")
+warnings.filterwarnings("ignore", message=".*urllib3.*match a supported version")
 
 import schedule
 from dotenv import load_dotenv
@@ -31,7 +36,7 @@ load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────────────────────
 TWS_HOST      = os.getenv("TWS_HOST",     "127.0.0.1")
-TWS_PORT      = int(os.getenv("TWS_PORT", "7497"))
+TWS_PORT      = int(os.getenv("TWS_PORT", "4001"))
 TWS_CLIENT    = int(os.getenv("TWS_CLIENT_ID", "1"))
 from config.tickers import get_all_tickers, get_all_ticker_symbols
 TICKERS       = get_all_tickers()          # List of dicts for IBKR jobs

@@ -12,7 +12,12 @@ Sections:
 
 import os
 import sys
+import warnings
 from pathlib import Path
+
+# Suppress specific Python 3.14 / dependency warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="langchain_core")
+warnings.filterwarnings("ignore", message=".*urllib3.*match a supported version")
 
 # ── Path fix so imports resolve from project root ─────────────────────────────
 ROOT = Path(__file__).parent.parent
