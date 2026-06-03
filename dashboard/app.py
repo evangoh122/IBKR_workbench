@@ -119,6 +119,10 @@ with st.sidebar:
 # ══════════════════════════════════════════════════════════════════════════════
 if page == "💬 Chat":
     st.title("💬 Chat with your data")
+    
+    chat_mode = st.radio("Chat Mode", ["Database (SQL)", "Knowledge Base (RAG)"], horizontal=True, 
+                         help="Database mode generates SQL to query numerical data. RAG mode searches SEC filings and ticker descriptions.")
+    
     st.caption("Ask anything about your stocks, options, EDGAR financials, or Polygon history. Powered by DeepSeek.")
 
     if "chat_history" not in st.session_state:
@@ -128,11 +132,12 @@ if page == "💬 Chat":
 
     # Check API key
     import os as _os
-    if not _os.getenv("DEEPSEEK_API_KEY"):
-        st.warning("⚠️  DEEPSEEK_API_KEY not set in .env — add your key from platform.deepseek.com")
+    if not _os.getenv("DEEPSEEK_API_KEY") and not _os.getenv("OPENAI_API_KEY") and not _os.getenv("ANTHROPIC_API_KEY") and _os.getenv("CHAT_PROVIDER", "ollama") != "ollama":
+        st.warning("⚠️  API key not set in .env for your chosen provider.")
         st.stop()
 
     from etl.chat_engine import chat as _chat
+    from rag_engine import ask_rag
 
     # ── Render existing conversation ───────────────────────────────────────
     for i, msg in enumerate(st.session_state.chat_history):
@@ -154,15 +159,19 @@ if page == "💬 Chat":
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # Call DeepSeek
+        # Call AI based on mode
         with st.chat_message("assistant"):
             with st.spinner("Thinking…"):
-                result = _chat(
-                    question=prompt,
-                    history=st.session_state.chat_history[:-1],
-                )
+                if chat_mode == "Database (SQL)":
+                    result = _chat(
+                        question=prompt,
+                        history=st.session_state.chat_history[:-1],
+                    )
+                    answer = result["answer"]
+                else:
+                    answer = ask_rag(prompt)
+                    result = {"type": "text", "sql": None, "data": None, "answer": answer}
 
-            answer = result["answer"]
             st.markdown(answer)
 
             if result.get("type") == "table" and result.get("data") is not None:
