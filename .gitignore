@@ -61,3 +61,7 @@ _ticker_checkpoint_page.txt
 
 # Audit files
 PROJECT_ERROR_AUDIT.yaml
+
+# Evals
+evals/data/
+evals/results/
