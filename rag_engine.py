@@ -24,12 +24,10 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
-
 from etl.embed_tickers import _get_model
-from etl.chat_engine import _PROVIDER, _BASE_URL, _MODEL, _KEY_ENV
+from etl.chat_engine import _BASE_URL, _MODEL, _KEY_ENV
 
-DB_PATH     = os.getenv("DB_PATH",     "./data/ibkr.duckdb")
-DUCKDB_PATH = os.getenv("DUCKDB_PATH", "./data/vectors.duckdb")
+DB_PATH = os.getenv("DB_PATH", "./data/ibkr.duckdb")
 EMBEDDING_DIM = 384
 
 
@@ -37,7 +35,7 @@ EMBEDDING_DIM = 384
 
 class DuckDBVectorRetriever(BaseRetriever):
     """
-    HNSW vector search over ticker_embeddings in vectors.duckdb.
+    HNSW vector search over ticker_embeddings in ibkr.duckdb.
     Falls back to ILIKE keyword search over polygon_tickers.description
     when the vector index is empty.
     """
@@ -48,35 +46,33 @@ class DuckDBVectorRetriever(BaseRetriever):
     ) -> List[Document]:
         # ── Try vector search first ────────────────────────────────────────
         try:
-            vec_conn = duckdb.connect(DUCKDB_PATH, read_only=True)
-            vec_conn.execute("LOAD vss")
-            count = vec_conn.execute(
-                "SELECT COUNT(*) FROM ticker_embeddings"
-            ).fetchone()[0]
+            with duckdb.connect(DB_PATH, read_only=True) as conn:
+                conn.execute("LOAD vss")
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM ticker_embeddings"
+                ).fetchone()[0]
 
-            if count > 0:
-                model = _get_model()
-                qvec  = model.encode(
-                    [query], normalize_embeddings=True, show_progress_bar=False
-                )[0].tolist()
+                if count > 0:
+                    model = _get_model()
+                    qvec  = model.encode(
+                        [query], normalize_embeddings=True, show_progress_bar=False
+                    )[0].tolist()
 
-                rows = vec_conn.execute(f"""
-                    SELECT ticker, text,
-                           array_distance(embedding, ?::FLOAT[{EMBEDDING_DIM}]) AS dist
-                    FROM ticker_embeddings
-                    ORDER BY dist ASC
-                    LIMIT {self.top_k}
-                """, [qvec]).fetchall()
-                vec_conn.close()
+                    rows = conn.execute(f"""
+                        SELECT ticker, text,
+                               array_distance(embedding, ?::FLOAT[{EMBEDDING_DIM}]) AS dist
+                        FROM ticker_embeddings
+                        ORDER BY dist ASC
+                        LIMIT {self.top_k}
+                    """, [qvec]).fetchall()
 
-                return [
-                    Document(
-                        page_content=r[1],
-                        metadata={"source": "vector_search", "ticker": r[0], "distance": r[2]},
-                    )
-                    for r in rows
-                ]
-            vec_conn.close()
+                    return [
+                        Document(
+                            page_content=r[1],
+                            metadata={"source": "vector_search", "ticker": r[0], "distance": r[2]},
+                        )
+                        for r in rows
+                    ]
         except Exception as e:
             logger.warning(f"Vector search failed: {e}")
 
@@ -193,6 +189,45 @@ class EDGARFactsRetriever(BaseRetriever):
             return []
 
 
+class EDGAREmbeddingsRetriever(BaseRetriever):
+    """
+    HNSW vector search over edgar_embeddings (10-K/10-Q chunks).
+    """
+    top_k: int = 5
+
+    def _get_relevant_documents(
+        self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+    ) -> List[Document]:
+        try:
+            with duckdb.connect(DB_PATH, read_only=True) as conn:
+                conn.execute("LOAD vss")
+                count = conn.execute("SELECT COUNT(*) FROM edgar_embeddings").fetchone()[0]
+                if count == 0:
+                    return []
+
+                model = _get_model()
+                qvec  = model.encode([query], normalize_embeddings=True, show_progress_bar=False)[0].tolist()
+
+                rows = conn.execute(f"""
+                    SELECT ticker, text, accession,
+                           array_distance(embedding, ?::FLOAT[{EMBEDDING_DIM}]) AS dist
+                    FROM edgar_embeddings
+                    ORDER BY dist ASC
+                    LIMIT {self.top_k}
+                """, [qvec]).fetchall()
+
+                return [
+                    Document(
+                        page_content=r[1],
+                        metadata={"source": "edgar_embeddings", "ticker": r[0], "accession": r[2], "distance": r[3]},
+                    )
+                    for r in rows
+                ]
+        except Exception as e:
+            logger.warning(f"EDGAR embedding search failed: {e}")
+            return []
+
+
 class PriceContextRetriever(BaseRetriever):
     """Latest close prices from polygon_bars for tickers found in the query."""
     top_k: int = 10
@@ -262,30 +297,34 @@ def _format_docs(docs: List[Document]) -> str:
 
 
 def _combined_retriever(query: str) -> List[Document]:
-    """Run all three retrievers and merge results."""
-    vector_docs = DuckDBVectorRetriever(top_k=5)._get_relevant_documents(
-        query, run_manager=None
-    )
-    edgar_docs  = EDGARFactsRetriever()._get_relevant_documents(
-        query, run_manager=None
-    )
-    price_docs  = PriceContextRetriever()._get_relevant_documents(
-        query, run_manager=None
-    )
-    return vector_docs + edgar_docs + price_docs
+    """Run all four retrievers and merge results."""
+    vector_docs = DuckDBVectorRetriever(top_k=5).invoke(query)
+    edgar_facts = EDGARFactsRetriever().invoke(query)
+    edgar_emb   = EDGAREmbeddingsRetriever(top_k=5).invoke(query)
+    price_docs  = PriceContextRetriever().invoke(query)
+    return vector_docs + edgar_facts + edgar_emb + price_docs
 
 
 def build_rag_chain():
     """Build LCEL RAG chain."""
-    if _KEY_ENV is None:
-        api_key = "ollama"
-    else:
+    from etl.chat_engine import _PROVIDER
+
+    if _PROVIDER == "anthropic":
+        from langchain_anthropic import ChatAnthropic
         api_key = os.getenv(_KEY_ENV, "")
         if not api_key:
             logger.warning(f"RAG: {_KEY_ENV} not set — using placeholder key")
             api_key = "placeholder"
-
-    llm = ChatOpenAI(model=_MODEL, api_key=api_key, base_url=_BASE_URL)
+        llm = ChatAnthropic(model=_MODEL, api_key=api_key)
+    else:
+        if _KEY_ENV is None:
+            api_key = "ollama"
+        else:
+            api_key = os.getenv(_KEY_ENV, "")
+            if not api_key:
+                logger.warning(f"RAG: {_KEY_ENV} not set — using placeholder key")
+                api_key = "placeholder"
+        llm = ChatOpenAI(model=_MODEL, api_key=api_key, base_url=_BASE_URL)
 
     return (
         {

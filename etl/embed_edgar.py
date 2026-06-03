@@ -111,8 +111,11 @@ def run_embed_edgar_etl(tickers: List[str]) -> int:
                 batch_chunks = chunks[i : i + batch_size]
                 vecs = model.encode(batch_chunks, normalize_embeddings=True, show_progress_bar=False)
                 
+                # Clear existing for this accession to ensure idempotency
+                if i == 0:
+                    conn.execute("DELETE FROM edgar_embeddings WHERE ticker = ? AND accession = ?", [ticker, accession])
+
                 for j, chunk_text in enumerate(batch_chunks):
-                    # We might want to clear old embeddings for this ticker/form or just append
                     conn.execute("""
                         INSERT INTO edgar_embeddings
                             (ticker, accession, text, embedding, updated_at)

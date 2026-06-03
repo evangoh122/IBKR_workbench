@@ -99,7 +99,7 @@ def run_edgar_filings_etl(
             logger.debug(f"EDGAR filings {ticker}: {rows_written} filings stored")
             time.sleep(_DELAY)
 
-    logger.info(f"EDGAR filings ETL complete: {total} filings across {len(tickers)} tickers")
+    logger.info(f"EDGAR filings ETL complete: {total} filings across {len(symbols)} tickers")
     return total
 
 
@@ -178,7 +178,7 @@ def run_edgar_facts_etl(tickers) -> int:
             logger.debug(f"EDGAR facts {ticker}: {rows_written} fact entries")
             time.sleep(_DELAY)
 
-    logger.info(f"EDGAR facts ETL complete: {total} entries across {len(tickers)} tickers")
+    logger.info(f"EDGAR facts ETL complete: {total} entries across {len(symbols)} tickers")
     return total
 
 

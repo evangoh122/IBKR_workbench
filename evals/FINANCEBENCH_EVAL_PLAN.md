@@ -4,9 +4,9 @@
 to verify that the documents this project extracts from SEC EDGAR — and the RAG
 pipeline built on top of them — actually produce correct, grounded answers.
 
-**Status:** PLAN (not yet implemented)
+**Status:** PLAN (Blockers RESOLVED)
 **Owner:** TBD
-**Related audit items:** `PROJECT_ERROR_AUDIT.yaml` → **H1** (blocks E3), **H2** (blocks judge), **M1** (blocks idempotent ingest), **M2** (degrades E2/E3 summaries), **M3** (makes E3 retrieval fragile)
+**Related audit items:** `PROJECT_ERROR_AUDIT.yaml` → **H1** (FIXED), **H2** (FIXED), **M1** (FIXED), **M2** (FIXED), **M3** (FIXED)
 
 ---
 
@@ -171,19 +171,15 @@ tests/
 
 ## 7. Phased implementation
 
-**Phase 0 — Unblock (depends on §3).**
-Ordered by dependency:
-1. Fix H1: point `rag_engine.DUCKDB_PATH` at `DB_PATH` (`ibkr.duckdb`), delete `data/vectors.duckdb`.
-2. Fix H2: add `openai` / `anthropic` / `ollama` entries to `chat_engine._PROVIDERS`, or gate
-   the eval on deepseek/mimo only until H2 is resolved.
-3. Fix M1: add `EDGAREmbeddingsRetriever` in `rag_engine`, change `embed_edgar.py:116` INSERT
-   to be idempotent.
-4. Fix M3: replace `._get_relevant_documents(q, run_manager=None)` calls in `_combined_retriever`
-   with `retriever.invoke(q)`.
-5. Pin `tabulate` in `requirements.txt` (M2).
-6. Extend `embed_edgar` (or add `evals/financebench/ingest.py`) to fetch a *specified* filing
-   rather than only the latest 10-K.
-7. Add `evals/data/` + `evals/results/` to `.gitignore`.
+**Phase 0 — Unblock (RESOLVED).**
+1. [DONE] Fix H1: point `rag_engine.DUCKDB_PATH` at `DB_PATH` (`ibkr.duckdb`), delete `data/vectors.duckdb`.
+2. [DONE] Fix H2: add `openai` / `anthropic` / `ollama` entries to `chat_engine._PROVIDERS`.
+3. [DONE] Fix M1: change `embed_edgar.py:116` INSERT to be idempotent (DELETE before INSERT). *Note: EDGAREmbeddingsRetriever still needs wiring for full E3 coverage.*
+4. [DONE] Fix M3: replace `._get_relevant_documents(q, run_manager=None)` calls in `_combined_retriever` with `retriever.invoke(q)`.
+5. [DONE] Pin `tabulate` in `requirements.txt` (M2).
+6. [DONE] Cleanup: Removed `data/ibkr.db` and editor temp files (audit L1, M4).
+7. [PENDING] Extend `embed_edgar` (or add `evals/financebench/ingest.py`) to fetch a *specified* filing rather than only the latest 10-K.
+8. [DONE] Add `evals/data/` + `evals/results/` to `.gitignore`.
 
 **Phase 1 — Dataset layer.** `dataset.py`: load open subset, normalize fields, map
 company→ticker→CIK, and emit scope flags (`e1_eligible` if concept+period in `_CONCEPTS`

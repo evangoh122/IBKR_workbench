@@ -643,7 +643,7 @@ elif page == "🔗 Options Chain":
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PAGE 4 — Transaction Cost Calculator
+# PAGE 5 — Transaction Cost Calculator
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "💸 Cost Calculator":
     st.title("💸 Transaction Cost Calculator")
@@ -802,7 +802,7 @@ elif page == "💸 Cost Calculator":
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PAGE 5 — ETL Health
+# PAGE 6 — ETL Health
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "🩺 ETL Health":
     st.title("🩺 ETL Health")
@@ -921,6 +921,7 @@ elif page == "ℹ️ About":
         sources2 = {
             "SEC EDGAR — Filings":         "SELECT COUNT(*) FROM edgar_filings",
             "SEC EDGAR — XBRL Facts":      "SELECT COUNT(*) FROM edgar_facts",
+            "CFTC — COT Reports":          "SELECT COUNT(*) FROM cot_reports",
             "Ticker embeddings (RAG)":     "SELECT COUNT(*) FROM ticker_embeddings",
         }
         for label, sql in sources2.items():
@@ -994,7 +995,7 @@ elif page == "ℹ️ About":
         st.markdown("- Streamlit")
         st.markdown("- Plotly (charts)")
         st.markdown("- Docker Compose")
-        st.markdown("- DeepSeek / OpenAI / Claude / Ollama")
+        st.markdown("- DeepSeek / Xiaomi MiMo")
 
     st.markdown("---")
 
