@@ -82,16 +82,19 @@ class IBKRClient(EWrapper, EClient):
 
     def connect_and_run(self):
         """Connect to TWS and start the reader thread."""
-        self.connect(self.host, self.port, self.client_id)
+        # Capture before calling connect() — ibapi resets self.host/self.port
+        # to None on a failed connection, which garbles the error message.
+        host, port = self.host, self.port
+        self.connect(host, port, self.client_id)
         self._thread = threading.Thread(target=self.run, daemon=True)
         self._thread.start()
         # Wait up to 10 s for nextValidId callback (signals ready)
         if not self._connected.wait(timeout=10):
             raise ConnectionError(
-                f"Could not connect to TWS at {self.host}:{self.port}. "
+                f"Could not connect to TWS at {host}:{port}. "
                 "Ensure TWS/Gateway is running and API connections are enabled."
             )
-        logger.info(f"Connected to TWS @ {self.host}:{self.port} (client {self.client_id})")
+        logger.info(f"Connected to TWS @ {host}:{port} (client {self.client_id})")
 
     def disconnect_and_stop(self):
         self.disconnect()
