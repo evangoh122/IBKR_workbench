@@ -22,7 +22,7 @@ DEFAULT_EXPIRY_CYCLES = int(os.getenv("OPTIONS_EXPIRY_CYCLES", 2))
 
 # ── Phase 1: Chain Discovery ──────────────────────────────────────────────────
 
-def refresh_option_chains(client: IBKRClient, tickers: List[str]) -> int:
+def refresh_option_chains(client: IBKRClient, tickers: List[dict]) -> int:
     """
     Fetch full option chains (all expiries/strikes) for each ticker.
     Upserts into option_chains metadata table.
@@ -30,9 +30,17 @@ def refresh_option_chains(client: IBKRClient, tickers: List[str]) -> int:
     """
     total = 0
     with get_connection() as conn:
-        for ticker in tickers:
+        for t_def in tickers:
+            ticker = t_def.get("symbol")
+            
+            # Skip non-optionable assets or explicitly excluded types
+            if t_def.get("secType") in ("CASH",):
+                continue
+                
             logger.info(f"Fetching option chain for {ticker}…")
-            chain = client.request_option_chain(ticker, timeout=30)
+            # Pass all config kwargs so the client knows if it's an IND, FUT, or STK
+            kwargs = {k: v for k, v in t_def.items() if k != "symbol"}
+            chain = client.request_option_chain(ticker, timeout=30, **kwargs)
 
             if not chain:
                 logger.warning(f"No chain data returned for {ticker}")
@@ -59,7 +67,7 @@ def refresh_option_chains(client: IBKRClient, tickers: List[str]) -> int:
 
 # ── Phase 2: Quote Selected Contracts ────────────────────────────────────────
 
-def run_option_etl(client: IBKRClient, tickers: List[str],
+def run_option_etl(client: IBKRClient, tickers: List[dict],
                    expiry_cycles: int = DEFAULT_EXPIRY_CYCLES) -> int:
     """
     Pull live option quotes for the nearest N expiry cycles per ticker.
@@ -69,7 +77,11 @@ def run_option_etl(client: IBKRClient, tickers: List[str],
     contracts_to_quote = []   # (ticker, expiry, strike, right)
 
     with get_connection() as conn:
-        for ticker in tickers:
+        for t_def in tickers:
+            ticker = t_def.get("symbol")
+            if t_def.get("secType") in ("CASH",):
+                continue
+                
             rows = conn.execute("""
                 SELECT DISTINCT expiry FROM option_chains
                 WHERE ticker = ?

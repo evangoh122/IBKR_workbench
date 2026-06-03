@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-import sqlite3
+import duckdb
 from datetime import datetime, timezone, timedelta
 
 import pandas as pd
@@ -32,7 +32,7 @@ load_dotenv(ROOT / ".env")
 
 from etl.slippage import calculate_costs, SlippageToggles
 
-DB_PATH = os.getenv("DB_PATH", str(ROOT / "data" / "ibkr.db"))
+DB_PATH = os.getenv("DB_PATH", str(ROOT / "data" / "ibkr.duckdb"))
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -75,9 +75,7 @@ st.markdown(f"""
 def get_conn():
     if not Path(DB_PATH).exists():
         return None
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return duckdb.connect(DB_PATH, read_only=True)
 
 
 def q(sql: str, params=()) -> pd.DataFrame:
@@ -85,7 +83,7 @@ def q(sql: str, params=()) -> pd.DataFrame:
     if conn is None:
         return pd.DataFrame()
     try:
-        return pd.read_sql_query(sql, conn, params=params)
+        return conn.execute(sql, list(params)).df()
     except Exception:
         return pd.DataFrame()
 
@@ -103,6 +101,7 @@ with st.sidebar:
     page = st.radio("Navigate", [
         "📊 Stock Quotes",
         "📉 Price History",
+        "📦 Polygon OHLCV",
         "🔗 Options Chain",
         "💸 Cost Calculator",
         "🩺 ETL Health",
@@ -285,7 +284,104 @@ elif page == "📉 Price History":
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PAGE 3 — Options Chain
+# PAGE 3 — Polygon OHLCV
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "📦 Polygon OHLCV":
+    st.title("📦 Polygon OHLCV — 2-Year Daily Bars")
+
+    if get_conn() is None:
+        no_db()
+
+    tickers = q("SELECT DISTINCT ticker FROM polygon_bars ORDER BY ticker")["ticker"].tolist()
+    if not tickers:
+        st.info("No polygon bars yet. Run `python main.py --job polygon-bars` first.")
+        st.stop()
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        ticker = st.selectbox("Ticker", tickers)
+    with c2:
+        periods = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365, "2Y": 730}
+        period  = st.selectbox("Period", list(periods.keys()), index=3)
+    with c3:
+        chart_type = st.selectbox("Chart", ["Candlestick", "OHLC", "Line"])
+
+    since = (datetime.now(timezone.utc) - timedelta(days=periods[period])).date().isoformat()
+    bars  = q("""
+        SELECT ts, open, high, low, close, volume, vwap
+        FROM polygon_bars
+        WHERE ticker = ? AND ts >= ? AND timespan = 'day'
+        ORDER BY ts
+    """, (ticker, since))
+
+    if bars.empty:
+        st.info(f"No data for {ticker}. Try running the bars ETL first.")
+        st.stop()
+
+    bars["ts"] = pd.to_datetime(bars["ts"])
+
+    # ── Price + Volume chart ───────────────────────────────────────────────
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                        row_heights=[0.7, 0.3], vertical_spacing=0.03)
+
+    if chart_type == "Candlestick":
+        fig.add_trace(go.Candlestick(
+            x=bars["ts"], open=bars["open"], high=bars["high"],
+            low=bars["low"], close=bars["close"],
+            increasing_line_color=CLR_GREEN, decreasing_line_color=CLR_RED,
+            name=ticker,
+        ), row=1, col=1)
+    elif chart_type == "OHLC":
+        fig.add_trace(go.Ohlc(
+            x=bars["ts"], open=bars["open"], high=bars["high"],
+            low=bars["low"], close=bars["close"],
+            increasing_line_color=CLR_GREEN, decreasing_line_color=CLR_RED,
+        ), row=1, col=1)
+    else:
+        fig.add_trace(go.Scatter(
+            x=bars["ts"], y=bars["close"],
+            line=dict(color=CLR_BLUE, width=1.5), name="Close",
+        ), row=1, col=1)
+        if bars["vwap"].notna().any():
+            fig.add_trace(go.Scatter(
+                x=bars["ts"], y=bars["vwap"],
+                line=dict(color=CLR_GOLD, width=1, dash="dot"), name="VWAP",
+            ), row=1, col=1)
+
+    colors = [CLR_GREEN if c >= o else CLR_RED
+              for c, o in zip(bars["close"].fillna(0), bars["open"].fillna(0))]
+    fig.add_trace(go.Bar(
+        x=bars["ts"], y=bars["volume"].fillna(0),
+        marker_color=colors, name="Volume", opacity=0.6,
+    ), row=2, col=1)
+
+    fig.update_layout(
+        template="plotly_dark", plot_bgcolor=CLR_BG, paper_bgcolor=CLR_BG,
+        height=620, margin=dict(t=20, b=20),
+        xaxis_rangeslider_visible=False,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    fig.update_yaxes(title_text="Price ($)", row=1, col=1)
+    fig.update_yaxes(title_text="Volume",    row=2, col=1)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ── Stats ──────────────────────────────────────────────────────────────
+    st.markdown("---")
+    s1, s2, s3, s4, s5 = st.columns(5)
+    s1.metric("Bars",        f"{len(bars):,}")
+    s2.metric("High",        f"${bars['high'].max():.2f}")
+    s3.metric("Low",         f"${bars['low'].min():.2f}")
+    s4.metric("Avg Volume",  f"{bars['volume'].mean()/1e6:.1f}M")
+    ret = (bars["close"].iloc[-1] / bars["close"].iloc[0] - 1) * 100
+    s5.metric("Period Return", f"{ret:+.1f}%")
+
+    # ── Raw data table ─────────────────────────────────────────────────────
+    with st.expander("Raw data"):
+        st.dataframe(bars.sort_values("ts", ascending=False), use_container_width=True, hide_index=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE 4 — Options Chain
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "🔗 Options Chain":
     st.title("🔗 Options Chain")
@@ -674,7 +770,7 @@ elif page == "🩺 ETL Health":
     st.subheader("Last Data Received Per Ticker")
     freshness = q("""
         SELECT ticker, MAX(ts) AS last_seen,
-               ROUND((JULIANDAY('now') - JULIANDAY(MAX(ts))) * 24, 1) AS hours_ago
+               ROUND(DATE_DIFF('hour', MAX(ts)::TIMESTAMP, NOW()), 1) AS hours_ago
         FROM stock_quotes GROUP BY ticker ORDER BY ticker
     """)
     if not freshness.empty:

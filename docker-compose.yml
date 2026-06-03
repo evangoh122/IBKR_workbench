@@ -1,0 +1,36 @@
+services:
+
+  dashboard:
+    build: .
+    container_name: ibkr_dashboard
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+      - ./config:/app/config:ro
+    command: >
+      streamlit run dashboard/app.py
+      --server.port=8501
+      --server.address=0.0.0.0
+      --server.headless=true
+      --browser.gatherUsageStats=false
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  etl:
+    build: .
+    container_name: ibkr_etl
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+      - ./config:/app/config
+    command: python main.py --job polygon-bars --schedule
+    restart: unless-stopped
+    depends_on:
+      - dashboard

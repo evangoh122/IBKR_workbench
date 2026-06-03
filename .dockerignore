@@ -1,0 +1,17 @@
+.git
+.env
+.env.*
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+.pytest_cache
+.planning
+graphify-out
+data/
+logs/
+*.duckdb
+*.db
+*.ipynb
+.gemini

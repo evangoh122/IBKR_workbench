@@ -204,6 +204,51 @@ class IBKRClient(EWrapper, EClient):
         c.exchange = "SMART"
         return c
 
+    def make_index_contract(self, ticker: str) -> Contract:
+        c = Contract()
+        c.symbol   = ticker
+        c.secType  = "IND"
+        c.currency = "USD"
+        # Major indices like SPX and VIX are on CBOE
+        c.exchange = "CBOE"
+        return c
+
+    def make_forex_contract(self, ticker: str) -> Contract:
+        # e.g., ticker="EUR.USD" or just "EUR" with currency="USD"
+        parts = ticker.split('.')
+        c = Contract()
+        c.symbol   = parts[0]
+        c.secType  = "CASH"
+        c.currency = parts[1] if len(parts) > 1 else "USD"
+        c.exchange = "IDEALPRO"
+        return c
+
+    def make_future_contract(self, ticker: str, expiry: str) -> Contract:
+        c = Contract()
+        c.symbol   = ticker
+        c.secType  = "FUT"
+        c.currency = "USD"
+        c.exchange = "CME"
+        c.lastTradeDateOrContractMonth = expiry
+        return c
+
+    def make_contract(self, symbol: str, secType: str = "STK", exchange: str = "SMART", currency: str = "USD", expiry: str = "") -> Contract:
+        """Universal contract builder."""
+        # Special handling for Forex strings (e.g. "EUR.USD")
+        if secType == "CASH" and "." in symbol:
+            parts = symbol.split(".")
+            symbol = parts[0]
+            currency = parts[1]
+
+        c = Contract()
+        c.symbol = symbol
+        c.secType = secType
+        c.exchange = exchange
+        c.currency = currency
+        if expiry:
+            c.lastTradeDateOrContractMonth = expiry
+        return c
+
     def make_option_contract(self, ticker: str, expiry: str,
                               strike: float, right: str) -> Contract:
         c = Contract()
@@ -233,9 +278,9 @@ class IBKRClient(EWrapper, EClient):
         self.reqMktData(req_id, contract, "233", True, False, [])
         return req_id
 
-    def resolve_con_id(self, ticker: str, timeout: int = 10) -> int:
+    def resolve_con_id(self, ticker: str, timeout: int = 10, **kwargs) -> int:
         """Resolve a ticker's conId via reqContractDetails. Returns 0 on failure."""
-        contract = self.make_stock_contract(ticker)
+        contract = self.make_contract(symbol=ticker, **kwargs)
         req_id = self.next_req_id()
         done_event = threading.Event()
         self._detail_results[req_id] = []
@@ -252,20 +297,20 @@ class IBKRClient(EWrapper, EClient):
         return 0
 
     def request_option_chain(self, ticker: str,
-                              timeout: int = 30) -> list:
+                              timeout: int = 30, **kwargs) -> list:
         """
         Synchronously fetch all option chain parameters for a ticker.
         Resolves the underlying conId first — required by some TWS versions.
         Returns list of (exchange, expiry, strike, right) tuples.
         """
-        con_id = self.resolve_con_id(ticker)
+        con_id = self.resolve_con_id(ticker, **kwargs)
 
         req_id = self.next_req_id()
         done_event = threading.Event()
         self._chain_results[req_id] = []
         self._chain_done[req_id]    = done_event
 
-        self.reqSecDefOptParams(req_id, ticker, "", "STK", con_id)
+        self.reqSecDefOptParams(req_id, ticker, "", kwargs.get('secType', 'STK'), con_id)
         done_event.wait(timeout=timeout)
 
         results = self._chain_results.pop(req_id, [])

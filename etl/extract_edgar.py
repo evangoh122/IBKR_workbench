@@ -38,8 +38,13 @@ def get_cik(ticker: str) -> Optional[str]:
 
 # ── Submissions (filing history) ──────────────────────────────────────────────
 
+def _symbol(t) -> str:
+    """Accept either a plain ticker string or a tickers-dict and return the symbol."""
+    return t["symbol"] if isinstance(t, dict) else str(t)
+
+
 def run_edgar_filings_etl(
-    tickers: List[str],
+    tickers,
     form_types: Optional[List[str]] = None,
 ) -> int:
     """
@@ -53,11 +58,11 @@ def run_edgar_filings_etl(
     form_set = set(form_types)
     total    = 0
 
-    # Fetch CIK map once for all tickers
-    cik_map  = _build_cik_map(tickers)
+    symbols  = [_symbol(t) for t in tickers]
+    cik_map  = _build_cik_map(symbols)
 
     with get_connection() as conn:
-        for ticker in tickers:
+        for ticker in symbols:
             cik = cik_map.get(ticker.upper())
             if not cik:
                 continue
@@ -110,16 +115,17 @@ _CONCEPTS = [
 ]
 
 
-def run_edgar_facts_etl(tickers: List[str]) -> int:
+def run_edgar_facts_etl(tickers) -> int:
     """
     Fetch XBRL financial facts for each ticker and store in edgar_facts.
     Only annual (10-K) and quarterly (10-Q) frames are stored.
     """
     total   = 0
-    cik_map = _build_cik_map(tickers)
+    symbols = [_symbol(t) for t in tickers]
+    cik_map = _build_cik_map(symbols)
 
     with get_connection() as conn:
-        for ticker in tickers:
+        for ticker in symbols:
             cik = cik_map.get(ticker.upper())
             if not cik:
                 continue

@@ -14,7 +14,7 @@ from db.database import get_connection
 from etl.ibkr_client import IBKRClient
 
 
-def run_stock_etl(client: IBKRClient, tickers: List[str]) -> int:
+def run_stock_etl(client: IBKRClient, tickers: List[dict]) -> int:
     """
     Request snapshots for all tickers, collect results, write to DB.
     Returns number of rows written.
@@ -31,17 +31,18 @@ def run_stock_etl(client: IBKRClient, tickers: List[str]) -> int:
                 ev.set()
 
     # Fire all snapshot requests
-    req_map = {}   # req_id -> ticker
-    for ticker in tickers:
-        contract = client.make_stock_contract(ticker)
+    req_map = {}   # req_id -> ticker symbol
+    for t_def in tickers:
+        contract = client.make_contract(**t_def)
+        symbol = t_def.get("symbol")
         ev = threading.Event()
         req_id = client.request_snapshot(contract, on_done)
         with lock:
             done_evts[req_id] = ev
             if req_id in results:   # callback already fired before we registered
                 ev.set()
-        req_map[req_id] = ticker
-        logger.debug(f"Requested snapshot req={req_id} ticker={ticker}")
+        req_map[req_id] = symbol
+        logger.debug(f"Requested snapshot req={req_id} ticker={symbol}")
 
     # Wait for all (max 15 s per ticker)
     timeout = 15
