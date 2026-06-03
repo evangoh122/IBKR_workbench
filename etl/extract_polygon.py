@@ -23,7 +23,7 @@ from db.database import get_connection
 
 def run_polygon_bars_etl(
     client: RESTClient,
-    tickers: List[str],
+    tickers: List[dict],
     timespan: str = "day",
     lookback_days: int = 7,
 ) -> int:
@@ -33,10 +33,11 @@ def run_polygon_bars_etl(
     total = 0
 
     with get_connection() as conn:
-        for ticker in tickers:
+        for t_def in tickers:
+            symbol = t_def.get("symbol")
             try:
                 aggs = client.get_aggs(
-                    _polygon_ticker(ticker), 1, timespan, from_, to_,
+                    _polygon_ticker(t_def), 1, timespan, from_, to_,
                     adjusted=True, limit=5000,
                 )
                 rows = 0
@@ -49,7 +50,7 @@ def run_polygon_bars_etl(
                              volume, vwap, transactions)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
-                        ticker, ts, timespan,
+                        symbol, ts, timespan,
                         getattr(a, "open",         None),
                         getattr(a, "high",         None),
                         getattr(a, "low",          None),
@@ -61,9 +62,9 @@ def run_polygon_bars_etl(
                     rows += 1
                 conn.commit()
                 total += rows
-                logger.debug(f"polygon bars {ticker}: {rows} bars ({timespan})")
+                logger.debug(f"polygon bars {symbol}: {rows} bars ({timespan})")
             except Exception as e:
-                logger.warning(f"polygon bars failed for {ticker}: {e}")
+                logger.warning(f"polygon bars failed for {symbol}: {e}")
 
     logger.info(f"polygon bars ETL complete: {total} rows across {len(tickers)} tickers")
     return total
@@ -73,40 +74,58 @@ def run_polygon_bars_etl(
 
 def run_polygon_snapshots_etl(
     client: RESTClient,
-    tickers: List[str],
+    tickers: List[dict],
 ) -> int:
-    """Fetch stock snapshots and insert into polygon_snapshots."""
+    """Fetch snapshots and insert into polygon_snapshots."""
     total = 0
     ts    = _utcnow()
 
-    # Batch all tickers in one API call
-    try:
-        snapshots = client.get_snapshot_all("stocks", ticker_symbols=tickers)
-        with get_connection() as conn:
-            for snap in snapshots:
-                ticker     = getattr(snap, "ticker", None)
-                last_quote = getattr(snap, "lastQuote", None) or getattr(snap, "last_quote", None)
-                last_trade = getattr(snap, "lastTrade", None) or getattr(snap, "last_trade", None)
-                day        = getattr(snap, "day",      None)
-                prev_day   = getattr(snap, "prevDay",  None) or getattr(snap, "prev_day", None)
+    # Map IBKR secType to Polygon market type
+    market_map = {
+        "STK": "stocks",
+        "CASH": "forex",
+        "IND": "indices"
+    }
 
-                bid        = _nested(last_quote, "p")       # bid price
-                ask        = _nested(last_quote, "P")       # ask price (capital P)
-                last       = _nested(last_trade, "p")       # last trade price
-                prev_close = _nested(prev_day,   "c")
-                day_volume = _nested(day,        "v")
+    # Group polygon formatted tickers by market type
+    groups = {}
+    for t_def in tickers:
+        sec_type = t_def.get("secType", "STK")
+        market = market_map.get(sec_type)
+        if market:
+            groups.setdefault(market, []).append(_polygon_ticker(t_def))
+        else:
+            logger.debug(f"Skipping unsupported snapshot secType: {sec_type} for {t_def.get('symbol')}")
 
-                conn.execute("""
-                    INSERT INTO polygon_snapshots
-                        (ticker, ts, bid, ask, last, prev_close, day_volume)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (ticker, ts, bid, ask, last, prev_close, day_volume))
-                total += 1
+    with get_connection() as conn:
+        for market, poly_tickers in groups.items():
+            try:
+                time.sleep(_RATE_DELAY)
+                snapshots = client.get_snapshot_all(market, ticker_symbols=",".join(poly_tickers))
+                for snap in snapshots:
+                    ticker     = getattr(snap, "ticker", None)
+                    last_quote = getattr(snap, "lastQuote", None) or getattr(snap, "last_quote", None)
+                    last_trade = getattr(snap, "lastTrade", None) or getattr(snap, "last_trade", None)
+                    day        = getattr(snap, "day",      None)
+                    prev_day   = getattr(snap, "prevDay",  None) or getattr(snap, "prev_day", None)
 
-            conn.commit()
-        logger.info(f"polygon snapshots ETL complete: {total} tickers")
-    except Exception as e:
-        logger.error(f"polygon snapshots ETL failed: {e}")
+                    bid        = _nested(last_quote, "p")       # bid price
+                    ask        = _nested(last_quote, "P")       # ask price (capital P)
+                    last       = _nested(last_trade, "p")       # last trade price
+                    prev_close = _nested(prev_day,   "c")
+                    day_volume = _nested(day,        "v")
+
+                    conn.execute("""
+                        INSERT INTO polygon_snapshots
+                            (ticker, ts, bid, ask, last, prev_close, day_volume)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (ticker, ts, bid, ask, last, prev_close, day_volume))
+                    total += 1
+
+                conn.commit()
+                logger.info(f"polygon snapshots ({market}) complete: {len(poly_tickers)} tickers requested")
+            except Exception as e:
+                logger.error(f"polygon snapshots ({market}) failed: {e}")
 
     return total
 
@@ -115,7 +134,7 @@ def run_polygon_snapshots_etl(
 
 def run_polygon_options_etl(
     client: RESTClient,
-    tickers: List[str],
+    tickers: List[dict],
     max_per_ticker: int = 500,
 ) -> int:
     """Fetch options chain snapshots and insert into polygon_option_snapshots."""
@@ -123,11 +142,15 @@ def run_polygon_options_etl(
     ts    = _utcnow()
 
     with get_connection() as conn:
-        for ticker in tickers:
+        for t_def in tickers:
+            symbol = t_def.get("symbol")
+            if t_def.get("secType") in ("CASH",):
+                continue  # Forex options typically not supported via this endpoint
+            
             try:
                 count = 0
                 time.sleep(_RATE_DELAY)
-                for opt in client.list_snapshot_options_chain(_polygon_ticker(ticker)):
+                for opt in client.list_snapshot_options_chain(_polygon_ticker(t_def)):
                     if count >= max_per_ticker:
                         break
 
@@ -147,7 +170,7 @@ def run_polygon_options_etl(
                              delta, gamma, theta, vega)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
-                        ticker, expiry, strike, contract_type, ts,
+                        symbol, expiry, strike, contract_type, ts,
                         _nested(day, "open"),
                         _nested(day, "close"),
                         _nested(day, "volume"),
@@ -162,9 +185,9 @@ def run_polygon_options_etl(
 
                 conn.commit()
                 total += count
-                logger.debug(f"polygon options {ticker}: {count} contracts")
+                logger.debug(f"polygon options {symbol}: {count} contracts")
             except Exception as e:
-                logger.warning(f"polygon options failed for {ticker}: {e}")
+                logger.warning(f"polygon options failed for {symbol}: {e}")
 
     logger.info(f"polygon options ETL complete: {total} contracts across {len(tickers)} tickers")
     return total
@@ -174,14 +197,15 @@ def run_polygon_options_etl(
 
 def run_polygon_reference_etl(
     client: RESTClient,
-    tickers: List[str],
+    tickers: List[dict],
 ) -> int:
     """Fetch ticker details and upsert into polygon_tickers."""
     total = 0
 
     with get_connection() as conn:
-        for ticker in tickers:
-            poly_ticker = _polygon_ticker(ticker)
+        for t_def in tickers:
+            symbol = t_def.get("symbol")
+            poly_ticker = _polygon_ticker(t_def)
             try:
                 d = client.get_ticker_details(poly_ticker)
                 conn.execute("""
@@ -190,7 +214,7 @@ def run_polygon_reference_etl(
                          active, currency, description, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    ticker,   # store under the IBKR-style key
+                    symbol,   # store under the IBKR-style key
                     getattr(d, "name",             None),
                     getattr(d, "market",           None),
                     getattr(d, "primary_exchange", None),
@@ -203,7 +227,7 @@ def run_polygon_reference_etl(
                 total += 1
                 time.sleep(_RATE_DELAY)
             except Exception as e:
-                logger.warning(f"polygon reference failed for {ticker}: {e}")
+                logger.warning(f"polygon reference failed for {symbol}: {e}")
 
         conn.commit()
     logger.info(f"polygon reference ETL complete: {total} tickers")
@@ -216,9 +240,24 @@ def run_polygon_reference_etl(
 _RATE_DELAY = float(os.getenv("POLYGON_RATE_DELAY", "13"))
 
 
-def _polygon_ticker(ticker: str) -> str:
-    """Normalize IBKR-style tickers to polygon format (e.g. 'BRK B' → 'BRK.B')."""
-    return ticker.strip().replace(" ", ".")
+def _polygon_ticker(t_def: dict) -> str:
+    """Normalize IBKR-style dictionary to polygon format."""
+    sec_type = t_def.get("secType", "STK")
+    symbol   = t_def.get("symbol", "").strip()
+    
+    if sec_type == "CASH":
+        currency = t_def.get("currency", "USD")
+        return f"C:{symbol}{currency}"
+    elif sec_type == "IND":
+        return f"I:{symbol}"
+    elif sec_type == "FUT":
+        # For simplicity, if we don't have a contract month suffix, we just query the root. 
+        # But polygon typically requires the full F:ESU24 format. We assume symbol contains it if provided.
+        return f"F:{symbol}"
+    
+    # STK (Stocks/Equities) do not require a prefix in most Polygon endpoints, 
+    # but we normalize BRK B to BRK.B
+    return symbol.replace(" ", ".")
 
 
 def _nested(obj, attr: str):

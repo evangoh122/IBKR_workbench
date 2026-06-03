@@ -41,6 +41,31 @@ groups:
     - AAEQ
     - AALG
     - AAOG
+  forex:
+    exchange: IDEALPRO
+    secType: CASH
+    tickers:
+    - EUR.USD
+    - GBP.USD
+    - USD.JPY
+    - USD.CHF
+    - AUD.USD
+  futures:
+    exchange: CME
+    secType: FUT
+    tickers:
+    - ES
+    - NQ
+    - YM
+    - RTY
+  indices:
+    exchange: CBOE
+    secType: IND
+    tickers:
+    - SPX
+    - VIX
+    - NDX
+    - RUT
   insurance_life:
     tickers:
     - AAME

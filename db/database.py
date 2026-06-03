@@ -235,7 +235,9 @@ def init_db():
             CREATE TABLE IF NOT EXISTS ticker_embeddings (
                 ticker      TEXT PRIMARY KEY,
                 industry    TEXT,
-                embedding   FLOAT[1536],   -- OpenAI / standard dimension
+                source      TEXT,
+                text        TEXT,
+                embedding   FLOAT[384],    -- all-MiniLM-L6-v2 dimension
                 updated_at  TIMESTAMP DEFAULT now()
             )
         """)

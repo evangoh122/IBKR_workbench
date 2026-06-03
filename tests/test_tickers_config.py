@@ -5,7 +5,7 @@ Tests for YAML ticker loader.
 import os
 import textwrap
 import pytest
-from config.tickers import get_all_tickers, get_tickers_by_group, get_expiry_cycles
+from config.tickers import get_all_tickers, get_all_ticker_symbols, get_tickers_by_group, get_expiry_cycles
 
 
 SAMPLE_YAML = textwrap.dedent("""
@@ -39,7 +39,7 @@ def yaml_file(tmp_path, monkeypatch):
 
 
 def test_get_all_tickers_flat(yaml_file):
-    tickers = get_all_tickers()
+    tickers = get_all_ticker_symbols()
     assert tickers == ["AAPL", "MSFT", "NVDA", "SPY", "QQQ"]
 
 
@@ -55,7 +55,7 @@ def test_get_all_tickers_deduplicates(tmp_path, monkeypatch):
     f.write_text(yaml)
     monkeypatch.setenv("TICKERS_YAML", str(f))
 
-    tickers = get_all_tickers()
+    tickers = get_all_ticker_symbols()
     assert tickers.count("MSFT") == 1
     assert len(tickers) == 3
 

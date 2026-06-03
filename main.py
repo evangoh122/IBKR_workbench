@@ -33,8 +33,9 @@ load_dotenv()
 TWS_HOST      = os.getenv("TWS_HOST",     "127.0.0.1")
 TWS_PORT      = int(os.getenv("TWS_PORT", "7497"))
 TWS_CLIENT    = int(os.getenv("TWS_CLIENT_ID", "1"))
-from config.tickers import get_all_tickers
-TICKERS       = get_all_tickers()
+from config.tickers import get_all_tickers, get_all_ticker_symbols
+TICKERS       = get_all_tickers()          # List of dicts for IBKR jobs
+TICKER_SYMBOLS = get_all_ticker_symbols()  # List of strings for REST APIs
 POLL_SECS     = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
 LOG_LEVEL     = os.getenv("LOG_LEVEL", "INFO")
 EXPIRY_CYCLES = int(os.getenv("OPTIONS_EXPIRY_CYCLES", "2"))
@@ -62,7 +63,6 @@ from etl.extract_polygon import (
     run_polygon_options_etl,
     run_polygon_reference_etl,
 )
-from db.vector_store import init_vector_db
 from etl.embed_tickers import run_embed_tickers_etl
 from etl.extract_edgar import run_edgar_filings_etl, run_edgar_facts_etl
 
@@ -207,7 +207,6 @@ def main():
 
     # Initialise databases
     init_db()
-    init_vector_db()
 
     # Jobs that don't need a TWS connection
     polygon_only_jobs = {

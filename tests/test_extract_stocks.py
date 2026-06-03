@@ -27,14 +27,19 @@ def _make_mock_client(snapshots: dict):
         return req_id
 
     client = MagicMock()
-    client.make_stock_contract.side_effect = lambda t: MagicMock(symbol=t)
+    client.make_contract.side_effect = lambda **kw: MagicMock(symbol=kw.get("symbol"))
     client.request_snapshot.side_effect = fake_snapshot
     return client
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-def test_run_stock_etl_writes_rows(sample_tickers, tmp_db):
+def test_run_stock_etl_writes_rows(tmp_db):
+    sample_tickers = [
+        {"symbol": "AAPL", "secType": "STK", "exchange": "SMART", "currency": "USD"},
+        {"symbol": "MSFT", "secType": "STK", "exchange": "SMART", "currency": "USD"},
+        {"symbol": "SPY", "secType": "STK", "exchange": "SMART", "currency": "USD"}
+    ]
     snapshots = {
         "AAPL": {"ts": "2024-01-15T14:30:00+00:00", "bid": 182.5, "ask": 182.6,
                  "last": 182.55, "close": 181.0, "volume": 50_000_000,
@@ -67,7 +72,7 @@ def test_run_stock_etl_correct_values(tmp_db):
                  "open": 180.0, "high": 183.0, "low": 179.0},
     }
     client = _make_mock_client(snapshots)
-    run_stock_etl(client, ["AAPL"])
+    run_stock_etl(client, [{"symbol": "AAPL", "secType": "STK", "exchange": "SMART", "currency": "USD"}])
 
     with get_connection() as conn:
         df = conn.execute("SELECT * FROM stock_quotes WHERE ticker='AAPL'").df()
@@ -82,7 +87,7 @@ def test_run_stock_etl_correct_values(tmp_db):
 def test_run_stock_etl_empty_snapshot(tmp_db):
     """If client returns empty dict, 0 rows should be written."""
     client = _make_mock_client({})
-    rows = run_stock_etl(client, ["AAPL"])
+    rows = run_stock_etl(client, [{"symbol": "AAPL", "secType": "STK", "exchange": "SMART", "currency": "USD"}])
     assert rows == 0
 
 
@@ -92,7 +97,7 @@ def test_run_stock_etl_partial_snapshots(tmp_db):
         "AAPL": {"ts": "2024-01-15T14:30:00+00:00", "last": 182.55}
     }
     client = _make_mock_client(snapshots)
-    run_stock_etl(client, ["AAPL"])
+    run_stock_etl(client, [{"symbol": "AAPL", "secType": "STK", "exchange": "SMART", "currency": "USD"}])
 
     with get_connection() as conn:
         df = conn.execute("SELECT * FROM stock_quotes WHERE ticker='AAPL'").df()

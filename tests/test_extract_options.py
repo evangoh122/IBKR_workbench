@@ -52,7 +52,7 @@ def test_refresh_option_chains_stores_entries(tmp_db):
         ]
     }
     client = _make_chain_client(chain_data)
-    total = refresh_option_chains(client, ["AAPL"])
+    total = refresh_option_chains(client, [{"symbol": "AAPL"}])
 
     assert total == 4
 
@@ -65,8 +65,8 @@ def test_refresh_option_chains_upserts(tmp_db):
     """Running refresh twice should not duplicate rows."""
     chain_data = {"AAPL": [("SMART", "20240119", 180.0, "C")]}
     client = _make_chain_client(chain_data)
-    refresh_option_chains(client, ["AAPL"])
-    refresh_option_chains(client, ["AAPL"])
+    refresh_option_chains(client, [{"symbol": "AAPL"}])
+    refresh_option_chains(client, [{"symbol": "AAPL"}])
 
     with get_connection() as conn:
         count = conn.execute(
@@ -78,7 +78,7 @@ def test_refresh_option_chains_upserts(tmp_db):
 def test_refresh_empty_chain(tmp_db):
     """No chain data returned → 0 rows, no crash."""
     client = _make_chain_client({})
-    total = refresh_option_chains(client, ["AAPL"])
+    total = refresh_option_chains(client, [{"symbol": "AAPL"}])
     assert total == 0
 
 
@@ -129,7 +129,7 @@ def test_run_option_etl_writes_rows(tmp_db):
         },
     }
     client = _make_quote_client(snapshots)
-    rows = run_option_etl(client, ["AAPL"], expiry_cycles=1)
+    rows = run_option_etl(client, [{"symbol": "AAPL"}], expiry_cycles=1)
 
     assert rows == 4
 
@@ -150,7 +150,7 @@ def test_run_option_etl_greeks_stored(tmp_db):
         }
     }
     client = _make_quote_client(snapshots)
-    run_option_etl(client, ["AAPL"], expiry_cycles=1)
+    run_option_etl(client, [{"symbol": "AAPL"}], expiry_cycles=1)
 
     with get_connection() as conn:
         df = conn.execute("SELECT * FROM option_quotes LIMIT 1").df()
@@ -164,5 +164,5 @@ def test_run_option_etl_greeks_stored(tmp_db):
 def test_run_option_etl_no_chain(tmp_db):
     """No chain in DB → 0 rows, logs warning, no crash."""
     client = _make_quote_client({})
-    rows = run_option_etl(client, ["AAPL"], expiry_cycles=1)
+    rows = run_option_etl(client, [{"symbol": "AAPL"}], expiry_cycles=1)
     assert rows == 0

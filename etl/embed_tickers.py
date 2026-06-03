@@ -3,8 +3,6 @@ etl/embed_tickers.py
 Generates text embeddings for ticker descriptions and stores them in DuckDB.
 
 Current source: polygon_tickers.description
-Future sources: EDGAR filings, news, etc. — add a new run_embed_<source>_etl()
-and upsert into ticker_embeddings with a different source tag.
 """
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -12,9 +10,9 @@ from typing import List, Optional
 from loguru import logger
 
 from db.database import get_connection
-from db.vector_store import EMBEDDING_DIM, get_duck_connection
 
 _model = None   # lazy-loaded SentenceTransformer
+EMBEDDING_DIM = 384
 
 
 def _get_model():
@@ -30,7 +28,7 @@ def _get_model():
 
 def run_embed_tickers_etl(batch_size: int = 64) -> int:
     """
-    Read descriptions from polygon_tickers (SQLite), embed with
+    Read descriptions from polygon_tickers (DuckDB), embed with
     all-MiniLM-L6-v2, and upsert into DuckDB ticker_embeddings.
     Returns number of tickers embedded.
     """
@@ -39,61 +37,35 @@ def run_embed_tickers_etl(batch_size: int = 64) -> int:
             SELECT ticker, name, description
             FROM polygon_tickers
             WHERE description IS NOT NULL AND trim(description) != ''
-        """).fetchall()
+        """).df().to_dict('records')
 
     if not rows:
         logger.warning("No ticker descriptions found — run --job polygon-ref first")
         return 0
 
     model  = _get_model()
-    duck   = get_duck_connection()
     total  = 0
     ts     = _utcnow()
 
-    for i in range(0, len(rows), batch_size):
-        batch  = rows[i : i + batch_size]
-        texts  = [f"{r['name']}: {r['description']}" for r in batch]
-        vecs   = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+    with get_connection() as conn:
+        for i in range(0, len(rows), batch_size):
+            batch  = rows[i : i + batch_size]
+            texts  = [f"{r['name']}: {r['description']}" for r in batch]
+            vecs   = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
 
-        for j, row in enumerate(batch):
-            duck.execute("""
-                INSERT OR REPLACE INTO ticker_embeddings
-                    (ticker, source, text, embedding, embedded_at)
-                VALUES (?, 'polygon_desc', ?, ?, ?)
-            """, [row["ticker"], texts[j], vecs[j].tolist(), ts])
+            for j, row in enumerate(batch):
+                conn.execute("""
+                    INSERT OR REPLACE INTO ticker_embeddings
+                        (ticker, source, text, embedding, updated_at)
+                    VALUES (?, 'polygon_desc', ?, ?, ?)
+                """, [row["ticker"], texts[j], vecs[j].tolist(), ts])
 
-        total += len(batch)
-        logger.debug(f"Embedded {total}/{len(rows)} tickers")
+            total += len(batch)
+            logger.debug(f"Embedded {total}/{len(rows)} tickers")
+        conn.commit()
 
-    duck.commit()
-    duck.close()
     logger.info(f"Embedding ETL complete: {total} tickers")
     return total
-
-
-# ── Similarity search ─────────────────────────────────────────────────────────
-
-def search_similar_tickers(query: str, top_k: int = 10) -> List[tuple]:
-    """
-    Find tickers whose descriptions are most similar to a natural-language query.
-    Returns list of (ticker, text, distance) — lower distance = more similar.
-
-    Example:
-        search_similar_tickers("semiconductor AI chip company", top_k=5)
-    """
-    model = _get_model()
-    qvec  = model.encode([query], normalize_embeddings=True)[0].tolist()
-
-    duck  = get_duck_connection()
-    rows  = duck.execute(f"""
-        SELECT ticker, text,
-               array_distance(embedding, ?::FLOAT[{EMBEDDING_DIM}]) AS distance
-        FROM ticker_embeddings
-        ORDER BY distance ASC
-        LIMIT ?
-    """, [qvec, top_k]).fetchall()
-    duck.close()
-    return rows
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────

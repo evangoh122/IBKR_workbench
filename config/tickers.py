@@ -17,18 +17,31 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
-def get_all_tickers() -> List[str]:
-    """Return a flat, deduplicated list of all tickers across all groups."""
+def get_all_tickers() -> List[dict]:
+    """Return a flat list of dictionaries with full contract details."""
     cfg = load_config()
     seen = set()
     tickers = []
-    for group in cfg.get("groups", {}).values():
+    for group_name, group in cfg.get("groups", {}).items():
+        secType  = group.get("secType", "STK")
+        exchange = group.get("exchange", "SMART")
+        currency = group.get("currency", "USD")
+
         for t in group.get("tickers", []):
-            t = t.strip()
+            t = str(t).strip()
             if t and t not in seen:
                 seen.add(t)
-                tickers.append(t)
+                tickers.append({
+                    "symbol": t,
+                    "secType": secType,
+                    "exchange": exchange,
+                    "currency": currency
+                })
     return tickers
+
+def get_all_ticker_symbols() -> List[str]:
+    """Return just the flat list of string symbols (legacy)."""
+    return [t["symbol"] for t in get_all_tickers()]
 
 
 def get_tickers_by_group() -> Dict[str, List[str]]:
