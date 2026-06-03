@@ -36,8 +36,8 @@ _PROVIDERS = {
         "allow_blank_key": False,
     },
     "anthropic": {
-        "base_url": "https://api.anthropic.com/v1",  # Note: chat_engine uses OpenAI client; Anthropic needs shim or different wrapper if raw
-        "model": "claude-3-5-sonnet-20240620",
+        "base_url": "https://api.anthropic.com/v1",  # used by rag_engine only; chat_engine raises ValueError for this provider
+        "model": "claude-sonnet-4-6",
         "api_key_env": "ANTHROPIC_API_KEY",
         "allow_blank_key": False,
     },
@@ -95,6 +95,13 @@ Rules:
 
 
 def _get_client() -> OpenAI:
+    if _PROVIDER == "anthropic":
+        raise ValueError(
+            "Anthropic's API is not OpenAI-compatible and cannot be used with the SQL chat "
+            "interface (which uses the OpenAI client). "
+            "For SQL chat use CHAT_PROVIDER=deepseek, openai, ollama, or mimo. "
+            "Anthropic is supported in RAG mode (rag_engine) via langchain-anthropic."
+        )
     api_key = os.getenv(_KEY_ENV, "")
     if not api_key and not _CFG["allow_blank_key"]:
         raise ValueError(

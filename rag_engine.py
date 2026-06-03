@@ -46,7 +46,6 @@ class DuckDBVectorRetriever(BaseRetriever):
     ) -> List[Document]:
         # ── Try vector search first ────────────────────────────────────────
         try:
-            vec = _get_model().encode(query).tolist()
             with duckdb.connect(DB_PATH, read_only=True) as conn:
                 conn.execute("LOAD vss")
                 count = conn.execute(
@@ -190,6 +189,45 @@ class EDGARFactsRetriever(BaseRetriever):
             return []
 
 
+class EDGAREmbeddingsRetriever(BaseRetriever):
+    """
+    HNSW vector search over edgar_embeddings (10-K/10-Q chunks).
+    """
+    top_k: int = 5
+
+    def _get_relevant_documents(
+        self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+    ) -> List[Document]:
+        try:
+            with duckdb.connect(DB_PATH, read_only=True) as conn:
+                conn.execute("LOAD vss")
+                count = conn.execute("SELECT COUNT(*) FROM edgar_embeddings").fetchone()[0]
+                if count == 0:
+                    return []
+
+                model = _get_model()
+                qvec  = model.encode([query], normalize_embeddings=True, show_progress_bar=False)[0].tolist()
+
+                rows = conn.execute(f"""
+                    SELECT ticker, text, accession,
+                           array_distance(embedding, ?::FLOAT[{EMBEDDING_DIM}]) AS dist
+                    FROM edgar_embeddings
+                    ORDER BY dist ASC
+                    LIMIT {self.top_k}
+                """, [qvec]).fetchall()
+
+                return [
+                    Document(
+                        page_content=r[1],
+                        metadata={"source": "edgar_embeddings", "ticker": r[0], "accession": r[2], "distance": r[3]},
+                    )
+                    for r in rows
+                ]
+        except Exception as e:
+            logger.warning(f"EDGAR embedding search failed: {e}")
+            return []
+
+
 class PriceContextRetriever(BaseRetriever):
     """Latest close prices from polygon_bars for tickers found in the query."""
     top_k: int = 10
@@ -259,24 +297,34 @@ def _format_docs(docs: List[Document]) -> str:
 
 
 def _combined_retriever(query: str) -> List[Document]:
-    """Run all three retrievers and merge results."""
+    """Run all four retrievers and merge results."""
     vector_docs = DuckDBVectorRetriever(top_k=5).invoke(query)
-    edgar_docs  = EDGARFactsRetriever().invoke(query)
+    edgar_facts = EDGARFactsRetriever().invoke(query)
+    edgar_emb   = EDGAREmbeddingsRetriever(top_k=5).invoke(query)
     price_docs  = PriceContextRetriever().invoke(query)
-    return vector_docs + edgar_docs + price_docs
+    return vector_docs + edgar_facts + edgar_emb + price_docs
 
 
 def build_rag_chain():
     """Build LCEL RAG chain."""
-    if _KEY_ENV is None:
-        api_key = "ollama"
-    else:
+    from etl.chat_engine import _PROVIDER
+
+    if _PROVIDER == "anthropic":
+        from langchain_anthropic import ChatAnthropic
         api_key = os.getenv(_KEY_ENV, "")
         if not api_key:
             logger.warning(f"RAG: {_KEY_ENV} not set — using placeholder key")
             api_key = "placeholder"
-
-    llm = ChatOpenAI(model=_MODEL, api_key=api_key, base_url=_BASE_URL)
+        llm = ChatAnthropic(model=_MODEL, api_key=api_key)
+    else:
+        if _KEY_ENV is None:
+            api_key = "ollama"
+        else:
+            api_key = os.getenv(_KEY_ENV, "")
+            if not api_key:
+                logger.warning(f"RAG: {_KEY_ENV} not set — using placeholder key")
+                api_key = "placeholder"
+        llm = ChatOpenAI(model=_MODEL, api_key=api_key, base_url=_BASE_URL)
 
     return (
         {
