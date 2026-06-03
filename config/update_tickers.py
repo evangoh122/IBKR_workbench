@@ -22,7 +22,7 @@ def fetch_all_finviz_tickers() -> Dict[str, List[str]]:
     
     try:
         # Fetch all stocks (limit=-1) with safety sleep to prevent IP blocks
-        df = foverview.screener_view(limit=-1, sleep_sec=1, verbose=1)
+        df = foverview.screener_view(order='Ticker', limit=100000, sleep_sec=1, verbose=1)
     except Exception as e:
         logger.error(f"Bulk fetch failed: {e}")
         return {}

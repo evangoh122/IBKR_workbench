@@ -1,72 +1,96 @@
-# tickers.yaml
-# Define your stock universe here.
-# The ETL reads from this file instead of the .env STOCK_TICKERS variable.
-#
-# Groups are purely for organisation — all tickers across all groups are processed.
-# You can add/remove tickers without touching any code.
-
 groups:
-
-  mega_cap:
-    description: "Mega-cap US equities"
+  aerospace_and_defense:
     tickers:
-      - AAPL    # Apple
-      - MSFT    # Microsoft
-      - NVDA    # Nvidia
-      - GOOGL   # Alphabet A
-      - AMZN    # Amazon
-      - META    # Meta
-      - TSLA    # Tesla
-      - BRK B   # Berkshire Hathaway B (IBKR uses space, not dot)
-      - JPM     # JPMorgan Chase
-      - V       # Visa
-
+    - AADX
+  airlines:
+    tickers:
+    - AAL
+  aluminum:
+    tickers:
+    - AA
+  asset_management:
+    tickers:
+    - AAMI
+  diagnostics_and_research:
+    tickers:
+    - A
+  education_and_training_services:
+    tickers:
+    - AACG
   etfs:
-    description: "Index & sector ETFs"
+    description: Index & sector ETFs
     tickers:
-      - SPY     # S&P 500
-      - QQQ     # Nasdaq 100
-      - IWM     # Russell 2000
-      - DIA     # Dow Jones
-      - GLD     # Gold
-      - TLT     # 20yr Treasury
-      - XLF     # Financials
-      - XLK     # Technology
-      - XLE     # Energy
-      - XLV     # Healthcare
-
+    - SPY
+    - QQQ
+    - IWM
+    - DIA
+    - GLD
+    - TLT
+    - XLF
+    - XLK
+    - XLE
+    - XLV
+  exchange_traded_fund:
+    tickers:
+    - AAA
+    - AAAA
+    - AAAC
+    - AAAD
+    - AAAU
+    - AADR
+    - AAEQ
+    - AALG
+    - AAOG
+  insurance_life:
+    tickers:
+    - AAME
+  mega_cap:
+    description: Mega-cap US equities
+    tickers:
+    - AAPL
+    - MSFT
+    - NVDA
+    - GOOGL
+    - AMZN
+    - META
+    - TSLA
+    - BRK B
+    - JPM
+    - V
   semiconductors:
-    description: "Semiconductor stocks"
+    description: Semiconductor stocks
     tickers:
-      - AMD
-      - INTC
-      - QCOM
-      - AVGO
-      - MU
-      - AMAT
-      - LRCX
-      - KLAC
-      - TXN
-      - MRVL
-
+    - AMD
+    - INTC
+    - QCOM
+    - AVGO
+    - MU
+    - AMAT
+    - LRCX
+    - KLAC
+    - TXN
+    - MRVL
+  shell_companies:
+    tickers:
+    - AACB
+    - AACI
+    - AACO
+    - AACP
   watchlist:
-    description: "Personal watchlist — edit freely"
+    description: "Personal watchlist \xE2\u20AC\u201D edit freely"
     tickers:
-      - COIN
-      - PLTR
-      - SOFI
-      - HOOD
-
-# ── Options config per ticker (optional overrides) ────────────────────────────
-# If a ticker is not listed here, it uses OPTIONS_EXPIRY_CYCLES from .env
+    - COIN
+    - PLTR
+    - SOFI
+    - HOOD
 options_config:
-  SPY:
-    expiry_cycles: 1    # SPY has huge chains — limit to nearest expiry
-  QQQ:
-    expiry_cycles: 1
-  IWM:
-    expiry_cycles: 1
   AAPL:
     expiry_cycles: 2
+  IWM:
+    expiry_cycles: 1
+  QQQ:
+    expiry_cycles: 1
+  SPY:
+    expiry_cycles: 1
   TSLA:
     expiry_cycles: 2
