@@ -53,3 +53,8 @@ graphify-out/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Editor temp files
+*.tmp.*
+_ticker_checkpoint.csv
+_ticker_checkpoint_page.txt
