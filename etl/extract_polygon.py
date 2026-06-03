@@ -38,10 +38,9 @@ def run_polygon_bars_etl(
             try:
                 aggs = client.get_aggs(
                     _polygon_ticker(t_def), 1, timespan, from_, to_,
-                    adjusted=True, limit=50000,  # polygon max — covers 25+ years of daily bars
+                    adjusted=True, limit=50000,
                 )
                 rows = 0
-                time.sleep(_RATE_DELAY)
                 for a in aggs:
                     ts = _ms_to_iso(getattr(a, "timestamp", None))
                     conn.execute("""
@@ -65,6 +64,9 @@ def run_polygon_bars_etl(
                 logger.debug(f"polygon bars {symbol}: {rows} bars ({timespan})")
             except Exception as e:
                 logger.warning(f"polygon bars failed for {symbol}: {e}")
+            finally:
+                # Always sleep — skipping on failures causes 429 cascades
+                time.sleep(_RATE_DELAY)
 
     logger.info(f"polygon bars ETL complete: {total} rows across {len(tickers)} tickers")
     return total
@@ -202,8 +204,12 @@ def run_polygon_reference_etl(
     """Fetch ticker details and upsert into polygon_tickers."""
     total = 0
 
+    # Reference data (descriptions, etc.) is most useful and reliable for stocks.
+    # Futures and Indices often cause 404s or 429s on the free tier.
+    stk_only = [t for t in tickers if t.get("secType", "STK") == "STK"]
+
     with get_connection() as conn:
-        for t_def in tickers:
+        for t_def in stk_only:
             symbol = t_def.get("symbol")
             poly_ticker = _polygon_ticker(t_def)
             try:
@@ -214,7 +220,7 @@ def run_polygon_reference_etl(
                          active, currency, description, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    symbol,   # store under the IBKR-style key
+                    symbol,
                     getattr(d, "name",             None),
                     getattr(d, "market",           None),
                     getattr(d, "primary_exchange", None),
@@ -225,9 +231,16 @@ def run_polygon_reference_etl(
                     _utcnow(),
                 ))
                 total += 1
-                time.sleep(_RATE_DELAY)
+                logger.debug(f"polygon reference {symbol}: updated")
             except Exception as e:
-                logger.warning(f"polygon reference failed for {symbol}: {e}")
+                if "429" in str(e):
+                    logger.warning(f"polygon reference 429 for {symbol} — sleeping 60s")
+                    time.sleep(60)
+                else:
+                    logger.warning(f"polygon reference failed for {symbol}: {e}")
+            finally:
+                # Always sleep — skipping on failures causes 429 cascades
+                time.sleep(_RATE_DELAY)
 
         conn.commit()
     logger.info(f"polygon reference ETL complete: {total} tickers")
