@@ -99,6 +99,7 @@ with st.sidebar:
     st.markdown("## ⚡ IBKR ETL")
     st.markdown("---")
     page = st.radio("Navigate", [
+        "💬 Chat",
         "📊 Stock Quotes",
         "📉 Price History",
         "📦 Polygon OHLCV",
@@ -114,9 +115,95 @@ with st.sidebar:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# PAGE 0 — Chat
+# ══════════════════════════════════════════════════════════════════════════════
+if page == "💬 Chat":
+    st.title("💬 Chat with your data")
+    st.caption("Ask anything about your stocks, options, EDGAR financials, or Polygon history. Powered by DeepSeek.")
+
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []   # list of {role, content}
+    if "chat_results" not in st.session_state:
+        st.session_state.chat_results = []   # list of result dicts (parallel to user turns)
+
+    # Check API key
+    import os as _os
+    if not _os.getenv("DEEPSEEK_API_KEY"):
+        st.warning("⚠️  DEEPSEEK_API_KEY not set in .env — add your key from platform.deepseek.com")
+        st.stop()
+
+    from etl.chat_engine import chat as _chat
+
+    # ── Render existing conversation ───────────────────────────────────────
+    for i, msg in enumerate(st.session_state.chat_history):
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+            # Show table result below assistant messages that have data
+            if msg["role"] == "assistant" and i // 2 < len(st.session_state.chat_results):
+                result = st.session_state.chat_results[i // 2]
+                if result and result.get("type") == "table" and result.get("data") is not None:
+                    with st.expander(f"📊 Query results ({len(result['data'])} rows)"):
+                        if result.get("sql"):
+                            st.code(result["sql"], language="sql")
+                        st.dataframe(result["data"], use_container_width=True, hide_index=True)
+
+    # ── Input ──────────────────────────────────────────────────────────────
+    if prompt := st.chat_input("Ask about your data… e.g. 'Show AAPL OHLCV for last 30 days'"):
+        # Add user message
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Call DeepSeek
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking…"):
+                result = _chat(
+                    question=prompt,
+                    history=st.session_state.chat_history[:-1],
+                )
+
+            answer = result["answer"]
+            st.markdown(answer)
+
+            if result.get("type") == "table" and result.get("data") is not None:
+                with st.expander(f"📊 Query results ({len(result['data'])} rows)"):
+                    if result.get("sql"):
+                        st.code(result["sql"], language="sql")
+                    st.dataframe(result["data"], use_container_width=True, hide_index=True)
+            elif result.get("type") == "error":
+                if result.get("sql"):
+                    st.code(result["sql"], language="sql")
+
+        st.session_state.chat_history.append({"role": "assistant", "content": answer})
+        st.session_state.chat_results.append(result)
+
+    # ── Example prompts ────────────────────────────────────────────────────
+    if not st.session_state.chat_history:
+        st.markdown("**Try asking:**")
+        examples = [
+            "Show me AAPL closing prices for the last 30 days",
+            "Which 10 tickers have the highest average volume in polygon_bars?",
+            "What was NVDA's revenue for the last 4 quarters?",
+            "Show the latest ETL run status for each job type",
+            "Which tickers have the widest bid-ask spreads right now?",
+        ]
+        cols = st.columns(len(examples))
+        for col, ex in zip(cols, examples):
+            with col:
+                if st.button(ex, use_container_width=True):
+                    st.session_state.chat_history.append({"role": "user", "content": ex})
+                    st.rerun()
+
+    if st.button("🗑️ Clear chat", key="clear_chat"):
+        st.session_state.chat_history = []
+        st.session_state.chat_results = []
+        st.rerun()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # PAGE 1 — Stock Quotes
 # ══════════════════════════════════════════════════════════════════════════════
-if page == "📊 Stock Quotes":
+elif page == "📊 Stock Quotes":
     st.title("📊 Stock Quotes")
 
     if get_conn() is None:
