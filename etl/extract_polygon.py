@@ -8,6 +8,7 @@ Four jobs:
   run_polygon_options_etl    – options chain snapshots (greeks, IV, OI)
   run_polygon_reference_etl  – ticker reference / metadata
 """
+import os
 import time
 from datetime import datetime, timedelta, timezone, date
 from typing import List, Optional
@@ -35,10 +36,11 @@ def run_polygon_bars_etl(
         for ticker in tickers:
             try:
                 aggs = client.get_aggs(
-                    ticker, 1, timespan, from_, to_,
+                    _polygon_ticker(ticker), 1, timespan, from_, to_,
                     adjusted=True, limit=5000,
                 )
                 rows = 0
+                time.sleep(_RATE_DELAY)
                 for a in aggs:
                     ts = _ms_to_iso(getattr(a, "timestamp", None))
                     conn.execute("""
@@ -124,7 +126,8 @@ def run_polygon_options_etl(
         for ticker in tickers:
             try:
                 count = 0
-                for opt in client.list_snapshot_options_chain(ticker):
+                time.sleep(_RATE_DELAY)
+                for opt in client.list_snapshot_options_chain(_polygon_ticker(ticker)):
                     if count >= max_per_ticker:
                         break
 
@@ -178,15 +181,16 @@ def run_polygon_reference_etl(
 
     with get_connection() as conn:
         for ticker in tickers:
+            poly_ticker = _polygon_ticker(ticker)
             try:
-                d = client.get_ticker_details(ticker)
+                d = client.get_ticker_details(poly_ticker)
                 conn.execute("""
                     INSERT OR REPLACE INTO polygon_tickers
                         (ticker, name, market, primary_exchange, type,
                          active, currency, description, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    ticker,
+                    ticker,   # store under the IBKR-style key
                     getattr(d, "name",             None),
                     getattr(d, "market",           None),
                     getattr(d, "primary_exchange", None),
@@ -197,7 +201,7 @@ def run_polygon_reference_etl(
                     _utcnow(),
                 ))
                 total += 1
-                time.sleep(0.1)   # be gentle on the API
+                time.sleep(_RATE_DELAY)
             except Exception as e:
                 logger.warning(f"polygon reference failed for {ticker}: {e}")
 
@@ -207,6 +211,15 @@ def run_polygon_reference_etl(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+# Free tier: 5 req/min → 13s between calls.  Paid tiers: set POLYGON_RATE_DELAY=0.1
+_RATE_DELAY = float(os.getenv("POLYGON_RATE_DELAY", "13"))
+
+
+def _polygon_ticker(ticker: str) -> str:
+    """Normalize IBKR-style tickers to polygon format (e.g. 'BRK B' → 'BRK.B')."""
+    return ticker.strip().replace(" ", ".")
+
 
 def _nested(obj, attr: str):
     """Safely get obj.attr, returning None if obj is None or attr is missing."""

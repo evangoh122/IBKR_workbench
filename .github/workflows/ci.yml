@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 env:
-  PYTHON_VERSION: "3.11"
-  DB_PATH: "./data/test.db"
+  PYTHON_VERSION: "3.12"
+  DB_PATH: "./data/test.duckdb"
 
 jobs:
   # ── Job 1: Lint + Tests ──────────────────────────────────────────────────
@@ -28,15 +28,13 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install -r requirements-test.txt
-          pip install -r requirements-dashboard.txt
-          pip install ruff
+          pip install ruff coverage
 
       - name: Lint with ruff
         run: ruff check etl/ db/ config/ dashboard/ --ignore E501
 
       - name: Run tests with coverage
-        run: pytest
+        run: coverage run -m pytest
         env:
           DB_PATH: ${{ env.DB_PATH }}
 
@@ -44,12 +42,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: coverage.xml
+          path: .coverage
 
       - name: Coverage summary
         run: |
-          pip install coverage
-          python -m coverage report --fail-under=70
+          coverage report --fail-under=70
 
   # ── Job 2: Build Docker image (on push to main) ──────────────────────────
   docker:
