@@ -5,6 +5,7 @@ categorizes them by industry, and updates config/tickers.yaml.
 """
 import yaml
 import time
+import re
 import pandas as pd
 from typing import Dict, List
 from loguru import logger
@@ -14,37 +15,50 @@ from pathlib import Path
 def fetch_all_finviz_tickers() -> Dict[str, List[str]]:
     """
     Fetches all tickers from Finviz screener and groups them by industry.
-    This replaces the industry-by-industry scraping with a single bulk fetch.
+    Returns a mapping of industry_name -> list_of_tickers.
     """
-    logger.info("Initializing Finviz bulk ticker fetch...")
+    logger.info("Initializing Finviz bulk ticker fetch (this may take 2-4 minutes)...")
     foverview = Overview()
     
-    # Fetch all stocks (limit=-1) with a safety sleep between page requests
-    # Note: This might take a few minutes as there are 8000+ tickers
     try:
+        # Fetch all stocks (limit=-1) with safety sleep to prevent IP blocks
         df = foverview.screener_view(limit=-1, sleep_sec=1, verbose=1)
     except Exception as e:
         logger.error(f"Bulk fetch failed: {e}")
         return {}
 
     if df.empty or 'Ticker' not in df.columns or 'Industry' not in df.columns:
-        logger.error("Failed to retrieve valid data from Finviz.")
+        logger.error("Failed to retrieve valid columns from Finviz.")
         return {}
 
-    logger.info(f"Retrieved {len(df)} tickers. Categorizing by industry...")
+    logger.info(f"Retrieved {len(df)} tickers. Categorizing...")
     
-    # Group by industry
     industry_map = {}
     for industry, group in df.groupby('Industry'):
-        # Sanitize industry name for YAML key
-        key = str(industry).lower().replace(" ", "_").replace("&", "and").replace("-", "_")
-        tickers = sorted(group['Ticker'].tolist())
-        industry_map[key] = tickers
+        # Skip N/A or empty industries
+        if pd.isna(industry) or str(industry).upper() in ("N/A", ""):
+            continue
+
+        # Clean industry name for YAML key
+        # 1. Lowercase and replace symbols
+        key = str(industry).lower().replace("&", "and").replace("-", " ")
+        # 2. Replace non-alphanumeric with space
+        key = re.sub(r'[^a-z0-9]', ' ', key)
+        # 3. Collapse multiple spaces to single underscore
+        key = "_".join(key.split())
+
+        tickers = sorted(list(set(group['Ticker'].tolist())))
+        
+        # Merge if multiple industries map to same sanitized key
+        if key in industry_map:
+            industry_map[key] = sorted(list(set(industry_map[key] + tickers)))
+        else:
+            industry_map[key] = tickers
         
     return industry_map
 
 def update_tickers_yaml(industry_map: Dict[str, List[str]], file_path: str = "config/tickers.yaml"):
-    """Overwrites or updates the tickers.yaml file in the project's expected format."""
+    """Overwrites industry groups in tickers.yaml while preserving other keys like options_config."""
     yaml_path = Path(file_path)
     
     if yaml_path.exists():
@@ -53,17 +67,16 @@ def update_tickers_yaml(industry_map: Dict[str, List[str]], file_path: str = "co
     else:
         full_config = {}
 
+    # Initialize groups if missing
     if "groups" not in full_config:
         full_config["groups"] = {}
 
-    # Update industry groups
-    for industry, tickers in industry_map.items():
-        # Sanitize industry name for YAML key
-        key = str(industry).lower().replace(" ", "_").replace("&", "and").replace("-", "_")
+    # Update industry groups with fresh data
+    for key, tickers in industry_map.items():
         full_config["groups"][key] = {"tickers": tickers}
 
     with open(yaml_path, 'w') as f:
-        yaml.dump(full_config, f, sort_keys=True)
+        yaml.dump(full_config, f, sort_keys=True, indent=2)
     
     logger.info(f"Updated {yaml_path} with {len(industry_map)} industries.")
 
