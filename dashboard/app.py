@@ -97,7 +97,7 @@ def no_db():
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## ⚡ IBKR ETL")
+    st.markdown("## ⚡ IBKR Workbench")
     st.markdown("---")
     page = st.radio("Navigate", [
         "💬 Chat",
@@ -107,6 +107,7 @@ with st.sidebar:
         "🔗 Options Chain",
         "💸 Cost Calculator",
         "🩺 ETL Health",
+        "ℹ️ About",
     ])
     st.markdown("---")
     st.caption(f"DB: `{DB_PATH}`")
@@ -884,3 +885,140 @@ elif page == "🩺 ETL Health":
             freshness.style.applymap(color_freshness, subset=["hours_ago"]),
             use_container_width=True, hide_index=True,
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE 8 — About
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "ℹ️ About":
+    st.title("ℹ️ IBKR Workbench")
+    st.markdown("**A full-stack quantitative research platform** — live market data, historical bars, SEC financials, and AI-powered natural language queries, all in one place.")
+
+    st.markdown("---")
+
+    # ── Data sources status ────────────────────────────────────────────────
+    st.subheader("📡 Data Sources")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**Market Data**")
+        sources = {
+            "Polygon.io — Daily bars":     "SELECT COUNT(*) FROM polygon_bars",
+            "Polygon.io — Option bars":    "SELECT COUNT(*) FROM polygon_option_bars",
+            "Polygon.io — Snapshots":      "SELECT COUNT(*) FROM polygon_snapshots",
+            "Polygon.io — Tickers":        "SELECT COUNT(*) FROM polygon_tickers",
+            "IBKR — Stock quotes":         "SELECT COUNT(*) FROM stock_quotes",
+            "IBKR — Option quotes":        "SELECT COUNT(*) FROM option_quotes",
+        }
+        for label, sql in sources.items():
+            n = q(sql)
+            count = int(n.iloc[0, 0]) if not n.empty else 0
+            status = "🟢" if count > 0 else "⚪"
+            st.markdown(f"{status} **{label}** — {count:,} rows")
+
+    with col2:
+        st.markdown("**Fundamentals & AI**")
+        sources2 = {
+            "SEC EDGAR — Filings":         "SELECT COUNT(*) FROM edgar_filings",
+            "SEC EDGAR — XBRL Facts":      "SELECT COUNT(*) FROM edgar_facts",
+            "Ticker embeddings (RAG)":     "SELECT COUNT(*) FROM ticker_embeddings",
+        }
+        for label, sql in sources2.items():
+            n = q(sql)
+            count = int(n.iloc[0, 0]) if not n.empty else 0
+            status = "🟢" if count > 0 else "⚪"
+            st.markdown(f"{status} **{label}** — {count:,} rows")
+
+        st.markdown("")
+        st.markdown("**AI Provider**")
+        import os as _os
+        provider = _os.getenv("CHAT_PROVIDER", "deepseek").title()
+        model    = _os.getenv("CHAT_MODEL", "")
+        st.markdown(f"🤖 **{provider}** {f'— `{model}`' if model else ''}")
+
+    st.markdown("---")
+
+    # ── Asset coverage ─────────────────────────────────────────────────────
+    st.subheader("📊 Asset Coverage")
+    assets = [
+        ("US Equities",        "~11,200 tickers",   "NYSE · NASDAQ · AMEX"),
+        ("Forex",              "17 pairs",           "EUR/USD, GBP/USD, USD/JPY + 14 more"),
+        ("Equity Futures",     "6 contracts",        "ES, NQ, RTY, YM + micros (CME)"),
+        ("Energy Futures",     "5 contracts",        "CL, NG, RB, HO, BZ (NYMEX)"),
+        ("Metals Futures",     "5 contracts",        "GC, SI, HG, PL, PA (COMEX)"),
+        ("Rate Futures",       "5 contracts",        "ZB, ZN, ZF, ZT, ZQ (CBOT)"),
+        ("Ag Futures",         "8 contracts",        "ZC, ZS, ZW + 5 more (CBOT)"),
+        ("FX Futures",         "7 contracts",        "6E, 6B, 6J, 6C, 6A, 6S, 6N (CME)"),
+        ("Crypto Futures",     "4 contracts",        "BTC, ETH, MBT, MET (CME)"),
+        ("Cash Indices",       "10 indices",         "SPX, VIX, NDX, RUT, DJX + global"),
+    ]
+    df_assets = pd.DataFrame(assets, columns=["Asset Class", "Coverage", "Notes"])
+    st.dataframe(df_assets, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # ── Dashboard pages ────────────────────────────────────────────────────
+    st.subheader("🖥️ Dashboard Pages")
+    pages = [
+        ("💬 Chat",           "Text-to-SQL + RAG — ask anything in plain English"),
+        ("📊 Stock Quotes",   "Live IBKR prices, bid-ask spreads, volume"),
+        ("📉 Price History",  "Candlestick / OHLC / line charts with volume"),
+        ("📦 Polygon OHLCV",  "Full-history daily bars with VWAP and period return"),
+        ("🔗 Options Chain",  "IV smile, Greeks heatmap, OI/volume, full chain table"),
+        ("💸 Cost Calculator","Round-trip slippage — spread + commission + market impact"),
+        ("🩺 ETL Health",     "Job run log, row counts, data freshness per ticker"),
+    ]
+    for icon_name, desc in pages:
+        st.markdown(f"**{icon_name}** — {desc}")
+
+    st.markdown("---")
+
+    # ── Tech stack ─────────────────────────────────────────────────────────
+    st.subheader("🔧 Tech Stack")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("**Backend**")
+        st.markdown("- Python 3.11+")
+        st.markdown("- DuckDB (main + vector store)")
+        st.markdown("- LangChain LCEL (RAG)")
+        st.markdown("- sentence-transformers")
+        st.markdown("- IBKR TWS API (ibapi)")
+    with c2:
+        st.markdown("**Data Sources**")
+        st.markdown("- Polygon.io REST API")
+        st.markdown("- SEC EDGAR REST API")
+        st.markdown("- Finviz screener")
+        st.markdown("- IBKR TWS/Gateway")
+    with c3:
+        st.markdown("**Frontend**")
+        st.markdown("- Streamlit")
+        st.markdown("- Plotly (charts)")
+        st.markdown("- Docker Compose")
+        st.markdown("- DeepSeek / OpenAI / Claude / Ollama")
+
+    st.markdown("---")
+
+    # ── Quick reference ────────────────────────────────────────────────────
+    st.subheader("⚡ Quick Reference")
+    st.code("""
+# Download full history from Polygon
+python main.py --job polygon-bars
+
+# Download historical options bars (top 12 liquid tickers)
+python main.py --job polygon-option-bars
+
+# Pull SEC EDGAR financials
+python main.py --job edgar-facts
+
+# Build vector index for RAG chat
+python main.py --job embed-tickers
+
+# Fetch full ticker universe (~11k stocks from Finviz)
+python -m config.update_tickers
+
+# Run dashboard
+streamlit run dashboard/app.py
+
+# Run everything in Docker
+docker compose up --build
+    """, language="bash")

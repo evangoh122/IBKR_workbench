@@ -1,20 +1,47 @@
 # IBKR Workbench
 
-A multi-source market data platform that pulls **live quotes from Interactive Brokers**, **historical OHLCV from Polygon.io**, **SEC EDGAR financials**, and **Finviz ticker universe** — storing everything in **DuckDB** with a **vector search index** and a **Streamlit dashboard**.
+A full-stack quantitative research platform — live market data from **Interactive Brokers**, historical **OHLCV + options bars from Polygon.io**, **SEC EDGAR financials**, and an **AI chat interface** to query it all in plain English.
+
+---
+
+## What it does
+
+| Layer | What's built |
+|---|---|
+| **Data ingestion** | ETL pipeline pulling from IBKR TWS, Polygon.io, SEC EDGAR, and Finviz |
+| **Storage** | DuckDB (`ibkr.duckdb`) — 13 tables covering equities, options, forex, futures, indices |
+| **Vector search** | DuckDB VSS (`vectors.duckdb`) — HNSW index on 384-dim ticker embeddings |
+| **Dashboard** | Streamlit + Plotly — 8 pages including candlestick charts, options chain, cost calculator |
+| **AI chat** | Text-to-SQL (DeepSeek/OpenAI/Claude/Ollama) + RAG over EDGAR financials |
+| **Deployment** | Docker Compose — separate dashboard and ETL containers |
 
 ---
 
 ## Architecture
 
 ```
-Data Sources                  Storage                  Interfaces
-────────────                  ───────                  ──────────
-IBKR TWS API  ──────────────► ibkr.duckdb ──────────► Streamlit Dashboard
-Polygon.io    ──────────────►   (11 tables)            (6 pages, Plotly charts)
-SEC EDGAR     ──────────────►
-Finviz        ──► tickers.yaml  vectors.duckdb ──────► Vector search API
-                               (HNSW index,            search_similar_tickers()
-                                384-dim embeddings)
+Data Sources            ETL Pipeline              Storage
+────────────            ────────────              ───────
+IBKR TWS API  ────────► extract_stocks.py  ─────► ibkr.duckdb
+               ────────► extract_options.py ────►   stock_quotes
+Polygon.io    ────────► extract_polygon.py ─────►   option_quotes / option_chains
+               ────────►   bars, snapshots  ─────►   polygon_bars
+               ────────►   options bars     ─────►   polygon_option_bars
+               ────────►   option snapshots ─────►   polygon_option_snapshots
+               ────────►   reference        ─────►   polygon_tickers / snapshots
+SEC EDGAR     ────────► extract_edgar.py   ─────►   edgar_filings / edgar_facts
+Finviz        ────────► update_tickers.py  ─────► config/tickers.yaml (11k+ tickers)
+                                                 ┌────────────────────────────────┐
+                                                 │  vectors.duckdb                │
+embed_tickers.py ──────────────────────────────► │  ticker_embeddings (HNSW)      │
+                                                 └────────────────────────────────┘
+
+Interfaces
+──────────
+ibkr.duckdb ──► Streamlit Dashboard (8 pages, Plotly charts)
+            ──► chat_engine.py  (Text-to-SQL via DeepSeek / OpenAI / Claude / Ollama)
+vectors.duckdb ► rag_engine.py  (LangChain RAG — EDGAR + descriptions)
+query.py    ──► Python API (latest_stock_quotes, stock_history, etl_run_log…)
 ```
 
 ---
@@ -24,8 +51,9 @@ Finviz        ──► tickers.yaml  vectors.duckdb ──────► Vecto
 | Requirement | Notes |
 |---|---|
 | Python 3.11+ | |
-| TWS or IB Gateway | For IBKR live data only |
-| Polygon.io API key | Free tier works (rate-limited); Starter $29/mo for full speed |
+| TWS or IB Gateway | For live IBKR data only — all other jobs work without it |
+| Polygon.io API key | Free tier: 5 req/min; Starter $29/mo for full speed |
+| DeepSeek / OpenAI / Anthropic key | For the AI chat interface |
 | Docker (optional) | For containerised deployment |
 
 ---
@@ -38,15 +66,24 @@ pip install -r requirements.txt
 
 # 2. Configure
 cp .env.example .env
-# Fill in POLYGON_API_KEY (and TWS settings if using IBKR)
+# Fill in: POLYGON_API_KEY, DEEPSEEK_API_KEY (or other provider)
 
-# 3. Fetch ticker universe (~7,000 US stocks from Finviz)
+# 3. Fetch 11,000+ US tickers from Finviz
 python -m config.update_tickers
 
-# 4. Download 2 years of daily OHLCV from Polygon
-python main.py --job polygon-bars
+# 4. Download full history from Polygon (stocks + options)
+python main.py --job polygon-ref       # ticker metadata
+python main.py --job polygon-bars      # OHLCV + VWAP daily bars (max history)
+python main.py --job polygon-option-bars  # historical options bars
 
-# 5. Launch the dashboard
+# 5. Pull SEC EDGAR financials
+python main.py --job edgar-filings
+python main.py --job edgar-facts
+
+# 6. Build vector index for AI chat
+python main.py --job embed-tickers
+
+# 7. Launch the dashboard
 streamlit run dashboard/app.py
 ```
 
@@ -73,94 +110,64 @@ docker compose up --build
 |---|---|---|
 | `POLYGON_API_KEY` | *(required)* | From polygon.io/dashboard/api-keys |
 | `POLYGON_BARS_TIMESPAN` | `day` | `second` / `minute` / `hour` / `day` |
-| `POLYGON_BARS_LOOKBACK` | `730` | Days of history to fetch |
+| `POLYGON_BARS_LOOKBACK` | `9500` | Days of history (~26 years max) |
 | `POLYGON_RATE_DELAY` | `13` | Seconds between calls (free=13, paid=0.1) |
+| `POLYGON_OPTION_BARS_TICKERS` | 12 liquid names | Comma-separated underlyings for options history |
+| `POLYGON_OPTION_BARS_MAX_CONTRACTS` | `250` | Max contracts per underlying |
+
+### AI Chat
+| Variable | Default | Description |
+|---|---|---|
+| `CHAT_PROVIDER` | `deepseek` | `deepseek` / `mimo` / `openai` / `anthropic` / `ollama` |
+| `CHAT_MODEL` | *(provider default)* | Override model name |
+| `DEEPSEEK_API_KEY` | | platform.deepseek.com |
+| `OPENAI_API_KEY` | | platform.openai.com |
+| `ANTHROPIC_API_KEY` | | console.anthropic.com |
+| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Local Ollama endpoint |
+| `OLLAMA_MODEL` | `llama3.2` | Any model pulled via `ollama pull` |
 
 ### Storage
 | Variable | Default | Description |
 |---|---|---|
 | `DB_PATH` | `./data/ibkr.duckdb` | Main DuckDB database |
-| `DUCKDB_PATH` | `./data/vectors.duckdb` | Vector store (embeddings) |
-| `TICKERS_YAML` | `config/tickers.yaml` | Ticker universe config |
-
-### General
-| Variable | Default | Description |
-|---|---|---|
-| `POLL_INTERVAL_SECONDS` | `60` | Interval for `--schedule` mode |
-| `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `DUCKDB_PATH` | `./data/vectors.duckdb` | Vector store |
+| `TICKERS_YAML` | `config/tickers.yaml` | Ticker universe |
 
 ---
 
 ## ETL Jobs
 
 ```bash
-# ── IBKR (requires TWS running) ───────────────────────────────────────────────
-python main.py                           # stocks + options (run once)
-python main.py --job stocks              # live stock quotes only
-python main.py --job options             # live option quotes (uses cached chain)
-python main.py --job chain               # refresh option chain metadata
-python main.py --schedule --refresh-chain  # continuous mode
-
 # ── Polygon.io (no TWS needed) ────────────────────────────────────────────────
-python main.py --job polygon-ref         # ticker metadata (name, exchange, description)
-python main.py --job polygon-bars        # OHLCV + VWAP daily bars (2yr default)
-python main.py --job polygon-quotes      # delayed stock snapshots
-python main.py --job polygon-options     # options chain snapshots + Greeks
-python main.py --job polygon             # all 4 polygon jobs
+python main.py --job polygon-ref          # ticker metadata (name, exchange, description)
+python main.py --job polygon-bars         # OHLCV + VWAP daily bars (full history)
+python main.py --job polygon-quotes       # delayed stock snapshots (bid/ask/last)
+python main.py --job polygon-options      # options chain snapshots + Greeks
+python main.py --job polygon-option-bars  # historical OHLCV bars per options contract
+python main.py --job polygon              # all polygon jobs
 
 # ── SEC EDGAR (no API key needed) ─────────────────────────────────────────────
-python main.py --job edgar-filings       # 10-K / 10-Q / 8-K filing history
-python main.py --job edgar-facts         # XBRL financials (revenue, EPS, assets …)
+python main.py --job edgar-filings        # 10-K / 10-Q / 8-K filing history
+python main.py --job edgar-facts          # XBRL financials (revenue, EPS, assets…)
 
-# ── Vector Search ─────────────────────────────────────────────────────────────
-python main.py --job embed-tickers       # embed ticker descriptions → HNSW index
+# ── AI / Vector search ────────────────────────────────────────────────────────
+python main.py --job embed-tickers        # embed ticker descriptions → HNSW index
 
-# ── Ticker Universe ───────────────────────────────────────────────────────────
-python -m config.update_tickers          # fetch all ~7,000 US stocks from Finviz
-python -m config.update_tickers --sectors Technology Healthcare  # specific sectors
-python -m config.update_tickers --dry-run   # preview counts, don't write
+# ── IBKR live data (requires TWS running) ────────────────────────────────────
+python main.py --job stocks               # live stock quotes
+python main.py --job options              # live option quotes
+python main.py --job chain                # refresh option chain metadata
+python main.py --schedule                 # continuous mode
+
+# ── Ticker universe ───────────────────────────────────────────────────────────
+python -m config.update_tickers           # fetch all ~11,000 US stocks from Finviz
+python -m config.update_tickers --sectors Technology Healthcare
+python -m config.update_tickers --dry-run
 ```
 
 ---
 
-## Database Schema
-
-All data lives in `data/ibkr.duckdb`.
-
-### IBKR Tables
-
-| Table | Description |
-|---|---|
-| `stock_quotes` | Live IBKR stock snapshots — bid/ask/last/OHLCV/VWAP |
-| `option_quotes` | Live IBKR option quotes — bid/ask/Greeks/IV/OI |
-| `option_chains` | Option chain metadata (expiry × strike × right) |
-| `etl_runs` | Audit log of every ETL job |
-
-### Polygon Tables
-
-| Table | Description |
-|---|---|
-| `polygon_bars` | Daily (or intraday) OHLCV + VWAP bars |
-| `polygon_snapshots` | Delayed stock snapshots — bid/ask/last |
-| `polygon_option_snapshots` | Options chain snapshots with Greeks |
-| `polygon_tickers` | Reference data — name, exchange, description |
-
-### EDGAR Tables
-
-| Table | Description |
-|---|---|
-| `edgar_filings` | 10-K / 10-Q / 8-K filing metadata |
-| `edgar_facts` | XBRL financial facts — revenue, net income, EPS, assets, equity, cash |
-
-### Vector Store (`data/vectors.duckdb`)
-
-| Table | Description |
-|---|---|
-| `ticker_embeddings` | 384-dim sentence embeddings of ticker descriptions (HNSW index) |
-
----
-
-## Streamlit Dashboard
+## Dashboard
 
 ```bash
 streamlit run dashboard/app.py
@@ -168,92 +175,136 @@ streamlit run dashboard/app.py
 
 | Page | Description |
 |---|---|
-| 📊 Stock Quotes | Live IBKR prices, spread comparison, volume |
-| 📉 Price History | Candlestick / OHLC / line chart with bid-ask band |
-| 📦 Polygon OHLCV | 2-year daily bars with VWAP, period return stats |
-| 🔗 Options Chain | IV smile, Greeks heatmap, OI/volume, chain table |
-| 💸 Cost Calculator | Round-trip slippage model (spread + commission + market impact) |
-| 🩺 ETL Health | Row counts, run log timeline, data freshness per ticker |
+| 💬 **Chat** | Natural language queries — SQL mode (Text-to-SQL) or RAG mode (knowledge base) |
+| 📊 **Stock Quotes** | Live IBKR prices, bid-ask spreads, volume |
+| 📉 **Price History** | Candlestick / OHLC / line chart with bid-ask band and volume |
+| 📦 **Polygon OHLCV** | Full-history daily bars with VWAP overlay and period return stats |
+| 🔗 **Options Chain** | IV smile, Greeks heatmap, OI/volume charts, full chain table |
+| 💸 **Cost Calculator** | Round-trip slippage model — spread + IBKR commission + market impact |
+| 🩺 **ETL Health** | Job run log, row counts per table, data freshness per ticker |
+| ℹ️ **About** | Platform overview, data source status, quick reference |
+
+---
+
+## AI Chat
+
+Two modes available on the Chat page:
+
+**SQL mode** — converts your question to DuckDB SQL, executes it, and summarises the result:
+> *"Show AAPL closing prices for the last 30 days"*
+> *"Which 10 tickers had the highest average volume last month?"*
+> *"What was NVDA's revenue for the last 4 quarters?"*
+
+**RAG mode** — searches the vector index and EDGAR facts, then answers from context:
+> *"What does Nvidia actually do as a business?"*
+> *"Compare Apple and Microsoft's balance sheets"*
+> *"Which companies in the semiconductor sector have the most cash?"*
+
+Switch providers with one line in `.env`:
+```
+CHAT_PROVIDER=deepseek   # or: openai | anthropic | mimo | ollama
+```
+
+---
+
+## Asset Coverage
+
+| Asset class | Tickers | Source |
+|---|---|---|
+| US equities | ~11,200 (NYSE + NASDAQ + AMEX) | Finviz |
+| Forex majors + minors | 17 pairs (EUR/USD, GBP/USD…) | IBKR IDEALPRO |
+| Equity index futures | ES, NQ, RTY, YM + micro | CME |
+| Energy futures | CL, NG, RB, HO, BZ | NYMEX |
+| Metals futures | GC, SI, HG, PL, PA | COMEX |
+| Rate futures | ZB, ZN, ZF, ZT | CBOT |
+| Agricultural futures | ZC, ZS, ZW + 5 more | CBOT |
+| FX futures | 6E, 6B, 6J, 6C, 6A, 6S, 6N | CME |
+| Crypto futures | BTC, ETH, MBT, MET | CME |
+| Cash indices | SPX, VIX, NDX, RUT, DJX + global | CBOE |
+
+---
+
+## Database Schema
+
+All data in `data/ibkr.duckdb` (13 tables):
+
+| Table | Rows (approx) | Description |
+|---|---|---|
+| `stock_quotes` | live | IBKR snapshots — bid/ask/last/OHLCV/VWAP |
+| `option_quotes` | live | IBKR option quotes — bid/ask/Greeks/IV/OI |
+| `option_chains` | live | Chain metadata (expiry × strike × right) |
+| `polygon_bars` | ~5,800/ticker | Daily OHLCV + VWAP, full history |
+| `polygon_option_bars` | varies | Historical OHLCV bars per contract |
+| `polygon_option_snapshots` | point-in-time | Options chain snapshots with Greeks |
+| `polygon_snapshots` | point-in-time | Stock delayed snapshots |
+| `polygon_tickers` | ~11k | Reference — name, exchange, description |
+| `edgar_filings` | varies | 10-K / 10-Q / 8-K filing history |
+| `edgar_facts` | varies | XBRL facts — revenue, EPS, assets, equity |
+| `ticker_embeddings` | ~11k | 384-dim sentence embeddings (HNSW) |
+| `edgar_embeddings` | optional | EDGAR filing text embeddings |
+| `etl_runs` | grows | Audit log of every ETL job |
+
+Vector store in `data/vectors.duckdb`.
 
 ---
 
 ## Docker
 
 ```bash
-# Build and start everything
+# Build and start both services
 docker compose up --build
 
-# Dashboard only (read-only, no ETL)
+# Dashboard only (read-only)
 docker compose up dashboard
 
-# ETL only (headless, runs on schedule)
+# ETL only (scheduled)
 docker compose up etl
 ```
 
-Services:
-- **dashboard** — Streamlit on `http://localhost:8501`
-- **etl** — runs `polygon-bars` on `POLL_INTERVAL_SECONDS` schedule
+- **dashboard** → `http://localhost:8501`
+- **etl** → runs `polygon-bars` on `POLL_INTERVAL_SECONDS` schedule
 
-Both share `./data/` as a volume mount so the DuckDB files persist and are accessible from either container.
+Both containers mount `./data/` as a shared volume.
 
 ---
 
-## Querying Programmatically
+## Python API
 
 ```python
 import duckdb
 conn = duckdb.connect("data/ibkr.duckdb", read_only=True)
 
-# 2 years of AAPL daily bars
+# Full price history for one ticker
 conn.execute("""
     SELECT ts, open, high, low, close, volume, vwap
     FROM polygon_bars WHERE ticker = 'AAPL' AND timespan = 'day'
     ORDER BY ts
 """).df()
 
-# Latest IBKR quote per ticker
+# Historical options bars
 conn.execute("""
-    SELECT ticker, last, bid, ask, volume
-    FROM stock_quotes
-    QUALIFY ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY ts DESC) = 1
+    SELECT option_ticker, ts, open, high, low, close, volume, vwap
+    FROM polygon_option_bars
+    WHERE underlying = 'SPY' AND right = 'call' AND expiry >= '2024-01-01'
+    ORDER BY option_ticker, ts
 """).df()
 
-# Revenue history from EDGAR
+# Latest EDGAR revenue
 conn.execute("""
     SELECT ticker, period_end, value AS revenue
     FROM edgar_facts
     WHERE concept = 'Revenues' AND form_type = '10-K'
-    ORDER BY ticker, period_end
+    ORDER BY ticker, period_end DESC
 """).df()
 ```
 
-Or use the query helpers:
+Query helpers:
 ```python
 from query import latest_stock_quotes, stock_history, latest_option_quotes, etl_run_log
-
-latest_stock_quotes()           # latest price for every ticker
-stock_history("AAPL", hours=24) # AAPL last 24h
-latest_option_quotes("AAPL")    # all AAPL options (latest snapshot)
-etl_run_log(20)                 # last 20 ETL runs
-```
-
-Semantic ticker search:
-```python
 from etl.embed_tickers import search_similar_tickers
+
 search_similar_tickers("semiconductor AI chip manufacturer", top_k=10)
 ```
-
----
-
-## Ticker Universe
-
-Tickers are defined in `config/tickers.yaml`, grouped by industry. Run `config/update_tickers.py` to repopulate from Finviz (all US exchanges, ~7,000 stocks):
-
-```bash
-python -m config.update_tickers
-```
-
-The file is also hand-editable — add or remove any ticker and all ETL jobs pick up the change automatically.
 
 ---
 
@@ -261,44 +312,48 @@ The file is also hand-editable — add or remove any ticker and all ETL jobs pic
 
 ```
 IBKR_workbench/
-├── main.py                    # Entry point — all ETL jobs + scheduler
-├── query.py                   # Query helpers + CLI summary
+├── main.py                       # Entry point — all ETL jobs + scheduler
+├── query.py                      # Query helpers + CLI summary
+├── rag_engine.py                 # LangChain RAG pipeline
 ├── requirements.txt
-├── .env.example
-├── Dockerfile
+├── Dockerfile.dashboard          # Streamlit container
+├── Dockerfile.etl                # ETL container
 ├── docker-compose.yml
 │
 ├── config/
-│   ├── tickers.yaml           # Ticker universe (grouped by industry)
-│   ├── tickers.py             # Loader — get_all_tickers(), get_expiry_cycles()
-│   └── update_tickers.py      # Finviz scraper — populates tickers.yaml
+│   ├── tickers.yaml              # 11k+ tickers across all asset classes
+│   ├── tickers.py                # Loader — get_all_tickers()
+│   └── update_tickers.py         # Finviz scraper with checkpoint/resume
 │
 ├── db/
-│   ├── database.py            # DuckDB schema + connection (ibkr.duckdb)
-│   └── vector_store.py        # DuckDB VSS setup (vectors.duckdb, HNSW index)
+│   ├── database.py               # DuckDB schema + connection (ibkr.duckdb)
+│   └── vector_store.py           # VSS setup reference (now in database.py)
 │
 ├── etl/
-│   ├── ibkr_client.py         # TWS API wrapper — EWrapper + EClient
-│   ├── extract_stocks.py      # IBKR stock snapshot ETL
-│   ├── extract_options.py     # IBKR option chain + quote ETL
-│   ├── polygon_client.py      # Polygon REST client factory
-│   ├── extract_polygon.py     # Polygon bars / snapshots / options / reference ETL
-│   ├── extract_edgar.py       # SEC EDGAR filings + XBRL facts ETL
-│   └── embed_tickers.py       # Sentence-transformer embeddings → vector store
+│   ├── ibkr_client.py            # TWS API wrapper — EWrapper + EClient
+│   ├── extract_stocks.py         # IBKR stock snapshot ETL
+│   ├── extract_options.py        # IBKR option chain + quote ETL
+│   ├── polygon_client.py         # Polygon REST client factory
+│   ├── extract_polygon.py        # Polygon bars / snapshots / options / reference
+│   ├── extract_edgar.py          # SEC EDGAR filings + XBRL facts
+│   ├── embed_tickers.py          # Sentence-transformer embeddings → vector store
+│   ├── chat_engine.py            # Text-to-SQL with read-only SQL validation
+│   └── slippage.py               # Transaction cost model
 │
 ├── dashboard/
-│   └── app.py                 # Streamlit + Plotly dashboard (6 pages)
+│   └── app.py                    # Streamlit + Plotly (8 pages)
 │
-├── data/                      # Auto-created — DuckDB files live here
-└── logs/                      # Daily rotating ETL logs
+├── data/                         # Auto-created — DuckDB files live here
+└── logs/                         # Daily rotating ETL logs
 ```
 
 ---
 
 ## Tips
 
-- **Free Polygon tier** — 5 req/min (13s delay). Set `POLYGON_RATE_DELAY=0.1` on paid plans.
-- **First IBKR run** — always pass `--refresh-chain` to populate option chain metadata before quoting options.
-- **Large chains** — SPY/QQQ have thousands of strikes; set `expiry_cycles: 1` in `tickers.yaml` `options_config` to limit scope.
-- **DuckDB concurrency** — the dashboard connects `read_only=True`; only the ETL process writes.
-- **EDGAR rate limit** — SEC allows 10 req/s; the ETL sleeps 0.12s between requests automatically.
+- **Paid Polygon plan** — set `POLYGON_RATE_DELAY=0.1` to cut full-history download from days to ~40 minutes
+- **First IBKR run** — always pass `--refresh-chain` to populate option chain metadata first
+- **Options bars scale** — each contract = 1 API call; use `POLYGON_OPTION_BARS_TICKERS` to limit scope
+- **DuckDB concurrency** — dashboard connects `read_only=True`; only the ETL process writes
+- **EDGAR rate limit** — SEC allows 10 req/s; the ETL sleeps 0.12s automatically
+- **MiMo locally** — `ollama pull xiaomi/MiMo-7B-RL` then set `CHAT_PROVIDER=mimo` for free local AI
