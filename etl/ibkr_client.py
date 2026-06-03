@@ -276,9 +276,9 @@ class IBKRClient(EWrapper, EClient):
         self._req_contracts[req_id] = contract
         self._on_snapshot[req_id]   = on_done
         self._snapshots[req_id]     = {}
-        # snapshot=True → reqMktData with snapshot flag
-        # genericTicklist="233" for VWAP
-        self.reqMktData(req_id, contract, "233", True, False, [])
+        # snapshot=True requires an empty genericTickList — IBKR rejects
+        # generic ticks (e.g. "233" for VWAP) on snapshot requests (error 321)
+        self.reqMktData(req_id, contract, "", True, False, [])
         return req_id
 
     def resolve_con_id(self, ticker: str, timeout: int = 10, **kwargs) -> int:
