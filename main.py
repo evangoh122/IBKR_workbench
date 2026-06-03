@@ -1,13 +1,18 @@
 """
 main.py
-Entry point for the IBKR ETL pipeline.
+Entry point for the IBKR + Polygon ETL pipeline.
 
 Usage:
-    python main.py                  # run once, all jobs
-    python main.py --job stocks     # only stock quotes
-    python main.py --job options    # only option quotes (uses cached chain)
-    python main.py --job chain      # only refresh option chain metadata
-    python main.py --schedule       # continuous mode, respects POLL_INTERVAL_SECONDS
+    python main.py                       # run once, all IBKR jobs
+    python main.py --job stocks          # only IBKR stock quotes
+    python main.py --job options         # only IBKR option quotes
+    python main.py --job chain           # only refresh IBKR option chain metadata
+    python main.py --job polygon         # all polygon.io jobs (bars, snapshots, options, reference)
+    python main.py --job polygon-bars    # polygon OHLCV bars only
+    python main.py --job polygon-quotes  # polygon stock snapshots only
+    python main.py --job polygon-options # polygon options chain only
+    python main.py --job polygon-ref     # polygon ticker reference only
+    python main.py --schedule            # continuous mode, respects POLL_INTERVAL_SECONDS
 """
 import argparse
 import os
@@ -22,14 +27,17 @@ from loguru import logger
 load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────────────────────
-TWS_HOST     = os.getenv("TWS_HOST",     "127.0.0.1")
-TWS_PORT     = int(os.getenv("TWS_PORT", "7497"))
-TWS_CLIENT   = int(os.getenv("TWS_CLIENT_ID", "1"))
+TWS_HOST      = os.getenv("TWS_HOST",     "127.0.0.1")
+TWS_PORT      = int(os.getenv("TWS_PORT", "7497"))
+TWS_CLIENT    = int(os.getenv("TWS_CLIENT_ID", "1"))
 from config.tickers import get_all_tickers
-TICKERS = get_all_tickers()
-POLL_SECS    = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
-LOG_LEVEL    = os.getenv("LOG_LEVEL", "INFO")
+TICKERS       = get_all_tickers()
+POLL_SECS     = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
+LOG_LEVEL     = os.getenv("LOG_LEVEL", "INFO")
 EXPIRY_CYCLES = int(os.getenv("OPTIONS_EXPIRY_CYCLES", "2"))
+
+POLYGON_TIMESPAN = os.getenv("POLYGON_BARS_TIMESPAN", "day")
+POLYGON_LOOKBACK = int(os.getenv("POLYGON_BARS_LOOKBACK", "7"))
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logger.remove()
@@ -44,9 +52,23 @@ from db.database import init_db
 from etl.ibkr_client import IBKRClient
 from etl.extract_stocks import run_stock_etl
 from etl.extract_options import refresh_option_chains, run_option_etl
+from etl.polygon_client import get_polygon_client
+from etl.extract_polygon import (
+    run_polygon_bars_etl,
+    run_polygon_snapshots_etl,
+    run_polygon_options_etl,
+    run_polygon_reference_etl,
+)
 
+
+from functools import wraps
+from db.database import get_connection
 
 # ── ETL helpers ───────────────────────────────────────────────────────────────
+
+def _utcnow() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
 
 def _log_run(conn, run_type: str, status: str,
              message: str, rows: int, started: str):
@@ -57,49 +79,78 @@ def _log_run(conn, run_type: str, status: str,
     conn.commit()
 
 
+def etl_job(run_type: str):
+    """Decorator to log ETL run status and timing to the DB."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            started = _utcnow()
+            try:
+                rows = func(*args, **kwargs)
+                with get_connection() as conn:
+                    _log_run(conn, run_type, "ok", f"{rows} rows", rows, started)
+                return rows
+            except Exception as e:
+                logger.error(f"{run_type.capitalize()} ETL failed: {e}")
+                with get_connection() as conn:
+                    _log_run(conn, run_type, "error", str(e), 0, started)
+                raise
+        return wrapper
+    return decorator
+
+
+@etl_job("stocks")
 def job_stocks(client: IBKRClient):
-    from db.database import get_connection
-    started = _utcnow()
-    try:
-        rows = run_stock_etl(client, TICKERS)
-        conn = get_connection()
-        _log_run(conn, "stocks", "ok", f"{rows} rows", rows, started)
-        conn.close()
-    except Exception as e:
-        logger.error(f"Stock ETL failed: {e}")
-        conn = get_connection()
-        _log_run(conn, "stocks", "error", str(e), 0, started)
-        conn.close()
+    return run_stock_etl(client, TICKERS)
 
 
+@etl_job("chain")
 def job_chain(client: IBKRClient):
-    from db.database import get_connection
-    started = _utcnow()
-    try:
-        rows = refresh_option_chains(client, TICKERS)
-        conn = get_connection()
-        _log_run(conn, "chain", "ok", f"{rows} entries", rows, started)
-        conn.close()
-    except Exception as e:
-        logger.error(f"Chain refresh failed: {e}")
-        conn = get_connection()
-        _log_run(conn, "chain", "error", str(e), 0, started)
-        conn.close()
+    return refresh_option_chains(client, TICKERS)
 
 
+@etl_job("options")
 def job_options(client: IBKRClient):
-    from db.database import get_connection
-    started = _utcnow()
+    return run_option_etl(client, TICKERS, EXPIRY_CYCLES)
+
+
+def _polygon_client_or_exit():
     try:
-        rows = run_option_etl(client, TICKERS, EXPIRY_CYCLES)
-        conn = get_connection()
-        _log_run(conn, "options", "ok", f"{rows} rows", rows, started)
-        conn.close()
-    except Exception as e:
-        logger.error(f"Options ETL failed: {e}")
-        conn = get_connection()
-        _log_run(conn, "options", "error", str(e), 0, started)
-        conn.close()
+        return get_polygon_client()
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(1)
+
+
+@etl_job("polygon-bars")
+def job_polygon_bars():
+    poly = _polygon_client_or_exit()
+    return run_polygon_bars_etl(poly, TICKERS, POLYGON_TIMESPAN, POLYGON_LOOKBACK)
+
+
+@etl_job("polygon-quotes")
+def job_polygon_snapshots():
+    poly = _polygon_client_or_exit()
+    return run_polygon_snapshots_etl(poly, TICKERS)
+
+
+@etl_job("polygon-options")
+def job_polygon_options():
+    poly = _polygon_client_or_exit()
+    return run_polygon_options_etl(poly, TICKERS)
+
+
+@etl_job("polygon-ref")
+def job_polygon_reference():
+    poly = _polygon_client_or_exit()
+    return run_polygon_reference_etl(poly, TICKERS)
+
+
+def job_polygon_all():
+    job_polygon_reference()
+    job_polygon_bars()
+    job_polygon_snapshots()
+    job_polygon_options()
 
 
 def run_all(client: IBKRClient, refresh_chain: bool = False):
@@ -117,9 +168,13 @@ def run_all(client: IBKRClient, refresh_chain: bool = False):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="IBKR ETL Pipeline")
+    parser = argparse.ArgumentParser(description="IBKR + Polygon ETL Pipeline")
     parser.add_argument("--job",
-                        choices=["stocks", "options", "chain", "all"],
+                        choices=[
+                            "stocks", "options", "chain", "all",
+                            "polygon", "polygon-bars", "polygon-quotes",
+                            "polygon-options", "polygon-ref",
+                        ],
                         default="all")
     parser.add_argument("--schedule", action="store_true",
                         help="Run continuously on POLL_INTERVAL_SECONDS")
@@ -130,7 +185,31 @@ def main():
     # Initialise DB
     init_db()
 
-    # Connect to TWS
+    # Polygon-only jobs don't need a TWS connection
+    polygon_only_jobs = {
+        "polygon":         job_polygon_all,
+        "polygon-bars":    job_polygon_bars,
+        "polygon-quotes":  job_polygon_snapshots,
+        "polygon-options": job_polygon_options,
+        "polygon-ref":     job_polygon_reference,
+    }
+    if args.job in polygon_only_jobs:
+        fn = polygon_only_jobs[args.job]
+        if not args.schedule:
+            fn()
+        else:
+            logger.info(f"Scheduled mode: running every {POLL_SECS}s (Ctrl-C to stop)")
+            fn()
+            schedule.every(POLL_SECS).seconds.do(fn)
+            try:
+                while True:
+                    schedule.run_pending()
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("Stopped by user")
+        return
+
+    # IBKR jobs require a TWS connection
     client = IBKRClient(TWS_HOST, TWS_PORT, TWS_CLIENT)
     try:
         client.connect_and_run()

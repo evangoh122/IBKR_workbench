@@ -29,33 +29,31 @@ def refresh_option_chains(client: IBKRClient, tickers: List[str]) -> int:
     Returns total contracts stored.
     """
     total = 0
-    conn  = get_connection()
+    with get_connection() as conn:
+        for ticker in tickers:
+            logger.info(f"Fetching option chain for {ticker}…")
+            chain = client.request_option_chain(ticker, timeout=30)
 
-    for ticker in tickers:
-        logger.info(f"Fetching option chain for {ticker}…")
-        chain = client.request_option_chain(ticker, timeout=30)
+            if not chain:
+                logger.warning(f"No chain data returned for {ticker}")
+                continue
 
-        if not chain:
-            logger.warning(f"No chain data returned for {ticker}")
-            continue
+            # Prefer SMART exchange; fall back to first available
+            smart = [(exp, strike, right)
+                     for (exch, exp, strike, right) in chain
+                     if exch == "SMART"]
+            rows  = smart or [(exp, strike, right)
+                              for (_, exp, strike, right) in chain]
 
-        # Prefer SMART exchange; fall back to first available
-        smart = [(exp, strike, right)
-                 for (exch, exp, strike, right) in chain
-                 if exch == "SMART"]
-        rows  = smart or [(exp, strike, right)
-                          for (_, exp, strike, right) in chain]
+            conn.executemany("""
+                INSERT OR REPLACE INTO option_chains (ticker, expiry, strike, right)
+                VALUES (?, ?, ?, ?)
+            """, [(ticker, exp, strike, right) for (exp, strike, right) in rows])
+            conn.commit()
 
-        conn.executemany("""
-            INSERT OR REPLACE INTO option_chains (ticker, expiry, strike, right)
-            VALUES (?, ?, ?, ?)
-        """, [(ticker, exp, strike, right) for (exp, strike, right) in rows])
-        conn.commit()
+            total += len(rows)
+            logger.info(f"{ticker}: stored {len(rows)} chain entries")
 
-        total += len(rows)
-        logger.info(f"{ticker}: stored {len(rows)} chain entries")
-
-    conn.close()
     return total
 
 
@@ -67,33 +65,30 @@ def run_option_etl(client: IBKRClient, tickers: List[str],
     Pull live option quotes for the nearest N expiry cycles per ticker.
     Returns number of rows written.
     """
-    conn = get_connection()
-
     # Gather contracts to quote
     contracts_to_quote = []   # (ticker, expiry, strike, right)
 
-    for ticker in tickers:
-        rows = conn.execute("""
-            SELECT DISTINCT expiry FROM option_chains
-            WHERE ticker = ?
-            ORDER BY expiry ASC
-        """, (ticker,)).fetchall()
+    with get_connection() as conn:
+        for ticker in tickers:
+            rows = conn.execute("""
+                SELECT DISTINCT expiry FROM option_chains
+                WHERE ticker = ?
+                ORDER BY expiry ASC
+            """, (ticker,)).fetchall()
 
-        expiries = [r["expiry"] for r in rows][:get_expiry_cycles(ticker, expiry_cycles)]
-        if not expiries:
-            logger.warning(f"No chain data in DB for {ticker} — run chain refresh first")
-            continue
+            expiries = [r["expiry"] for r in rows][:get_expiry_cycles(ticker, expiry_cycles)]
+            if not expiries:
+                logger.warning(f"No chain data in DB for {ticker} — run chain refresh first")
+                continue
 
-        for expiry in expiries:
-            strikes = conn.execute("""
-                SELECT strike, right FROM option_chains
-                WHERE ticker=? AND expiry=?
-                ORDER BY strike
-            """, (ticker, expiry)).fetchall()
-            for s in strikes:
-                contracts_to_quote.append((ticker, expiry, s["strike"], s["right"]))
-
-    conn.close()
+            for expiry in expiries:
+                strikes = conn.execute("""
+                    SELECT strike, right FROM option_chains
+                    WHERE ticker=? AND expiry=?
+                    ORDER BY strike
+                """, (ticker, expiry)).fetchall()
+                for s in strikes:
+                    contracts_to_quote.append((ticker, expiry, s["strike"], s["right"]))
 
     if not contracts_to_quote:
         logger.warning("No option contracts to quote")
@@ -158,6 +153,8 @@ def run_option_etl(client: IBKRClient, tickers: List[str],
                 "gamma":         snap.get("gamma"),
                 "theta":         snap.get("theta"),
                 "vega":          snap.get("vega"),
+                "und_price":     snap.get("und_price"),
+                "pv_dividend":   snap.get("pv_dividend"),
             })
 
         logger.debug(f"Batch {i//BATCH + 1}: collected {len(all_rows)} rows so far")
@@ -167,17 +164,18 @@ def run_option_etl(client: IBKRClient, tickers: List[str],
         logger.warning("No option quote data received")
         return 0
 
-    conn = get_connection()
-    conn.executemany("""
-        INSERT INTO option_quotes
-            (ticker, expiry, strike, right, ts, bid, ask, last,
-             volume, open_interest, implied_vol, delta, gamma, theta, vega)
-        VALUES
-            (:ticker, :expiry, :strike, :right, :ts, :bid, :ask, :last,
-             :volume, :open_interest, :implied_vol, :delta, :gamma, :theta, :vega)
-    """, all_rows)
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        conn.executemany("""
+            INSERT INTO option_quotes
+                (ticker, expiry, strike, right, ts, bid, ask, last,
+                 volume, open_interest, implied_vol, delta, gamma, theta, vega,
+                 und_price, pv_dividend)
+            VALUES
+                (:ticker, :expiry, :strike, :right, :ts, :bid, :ask, :last,
+                 :volume, :open_interest, :implied_vol, :delta, :gamma, :theta, :vega,
+                 :und_price, :pv_dividend)
+        """, all_rows)
+        conn.commit()
 
     logger.info(f"Wrote {len(all_rows)} option quote rows")
     return len(all_rows)

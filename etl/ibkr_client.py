@@ -24,6 +24,7 @@ TICK_CLOSE     = 9
 TICK_OPEN      = 14
 TICK_HIGH      = 6
 TICK_LOW       = 7
+TICK_VWAP      = 37
 TICK_OI        = 22   # open interest (options)
 TICK_IV        = 24   # implied volatility (options)
 TICK_DELTA     = 25
@@ -138,6 +139,12 @@ class IBKRClient(EWrapper, EClient):
                 self._snapshots.setdefault(reqId, {})["ts"] = _utcnow()
                 self._snapshots[reqId][field] = size
 
+    def tickGeneric(self, reqId, tickType, value):
+        if tickType == TICK_VWAP:
+            with self._lock:
+                self._snapshots.setdefault(reqId, {})["ts"] = _utcnow()
+                self._snapshots[reqId]["vwap"] = value
+
     def tickOptionComputation(self, reqId, tickType, tickAttrib,
                                impliedVol, delta, optPrice, pvDividend,
                                gamma, vega, theta, undPrice):
@@ -150,12 +157,15 @@ class IBKRClient(EWrapper, EClient):
                 snap["gamma"]       = gamma      if gamma      != -2 else None
                 snap["vega"]        = vega       if vega       != -2 else None
                 snap["theta"]       = theta      if theta      != -2 else None
+                snap["und_price"]   = undPrice   if undPrice   is not None else None
+                snap["pv_dividend"] = pvDividend if pvDividend is not None else None
 
     def tickSnapshotEnd(self, reqId):
         """Called when a snapshot request is complete."""
-        cb = self._on_snapshot.get(reqId)
+        cb = self._on_snapshot.pop(reqId, None)
         if cb:
-            snap = self._snapshots.get(reqId, {})
+            snap = self._snapshots.pop(reqId, {})
+            self._req_contracts.pop(reqId, None)
             cb(reqId, snap)
 
     # Contract detail callbacks (used to resolve conId)
@@ -219,7 +229,8 @@ class IBKRClient(EWrapper, EClient):
         self._on_snapshot[req_id]   = on_done
         self._snapshots[req_id]     = {}
         # snapshot=True → reqMktData with snapshot flag
-        self.reqMktData(req_id, contract, "", True, False, [])
+        # genericTicklist="233" for VWAP
+        self.reqMktData(req_id, contract, "233", True, False, [])
         return req_id
 
     def resolve_con_id(self, ticker: str, timeout: int = 10) -> int:

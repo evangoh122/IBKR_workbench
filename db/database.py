@@ -39,6 +39,7 @@ def init_db():
             open        REAL,
             high        REAL,
             low         REAL,
+            vwap        REAL,
             created_at  TEXT    DEFAULT (datetime('now'))
         )
     """)
@@ -66,6 +67,8 @@ def init_db():
             gamma           REAL,
             theta           REAL,
             vega            REAL,
+            und_price       REAL,
+            pv_dividend     REAL,
             created_at      TEXT    DEFAULT (datetime('now'))
         )
     """)
@@ -98,6 +101,90 @@ def init_db():
             rows_written INTEGER DEFAULT 0,
             started_at  TEXT    NOT NULL,
             finished_at TEXT
+        )
+    """)
+
+    # ── Polygon: OHLCV bars ───────────────────────────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS polygon_bars (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker          TEXT    NOT NULL,
+            ts              TEXT    NOT NULL,   -- bar open time, ISO-8601 UTC
+            timespan        TEXT    NOT NULL,   -- 'day' | 'minute' | 'hour'
+            open            REAL,
+            high            REAL,
+            low             REAL,
+            close           REAL,
+            volume          REAL,
+            vwap            REAL,
+            transactions    INTEGER,
+            created_at      TEXT    DEFAULT (datetime('now')),
+            UNIQUE(ticker, ts, timespan)
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_pb_ticker_ts
+            ON polygon_bars(ticker, ts, timespan)
+    """)
+
+    # ── Polygon: real-time / delayed snapshots ────────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS polygon_snapshots (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker      TEXT    NOT NULL,
+            ts          TEXT    NOT NULL,
+            bid         REAL,
+            ask         REAL,
+            last        REAL,
+            prev_close  REAL,
+            day_volume  REAL,
+            created_at  TEXT    DEFAULT (datetime('now'))
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_ps_ticker_ts
+            ON polygon_snapshots(ticker, ts)
+    """)
+
+    # ── Polygon: options chain snapshots ──────────────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS polygon_option_snapshots (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            underlying      TEXT    NOT NULL,
+            expiry          TEXT    NOT NULL,   -- YYYY-MM-DD
+            strike          REAL    NOT NULL,
+            right           TEXT    NOT NULL,   -- 'call' | 'put'
+            ts              TEXT    NOT NULL,
+            day_open        REAL,
+            day_close       REAL,
+            day_volume      INTEGER,
+            open_interest   INTEGER,
+            implied_vol     REAL,
+            delta           REAL,
+            gamma           REAL,
+            theta           REAL,
+            vega            REAL,
+            created_at      TEXT    DEFAULT (datetime('now'))
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_pos_underlying
+            ON polygon_option_snapshots(underlying, expiry, strike, right)
+    """)
+
+    # ── Polygon: ticker reference / metadata ──────────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS polygon_tickers (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker           TEXT    NOT NULL UNIQUE,
+            name             TEXT,
+            market           TEXT,
+            primary_exchange TEXT,
+            type             TEXT,
+            active           INTEGER,
+            currency         TEXT,
+            description      TEXT,
+            updated_at       TEXT    NOT NULL
         )
     """)
 

@@ -90,6 +90,7 @@ def calculate_costs(
     adv:        Optional[float] = None,
     toggles:    SlippageToggles = None,
     monthly_shares: float = 0,  # for IBKR tier lookup
+    sigma:      float = 0.015,  # 1.5% daily vol proxy by default
 ) -> CostBreakdown:
     """
     Calculate round-trip transaction costs.
@@ -101,6 +102,7 @@ def calculate_costs(
     bid / ask       : for spread calculation
     adv             : average daily volume in shares (for market impact)
     monthly_shares  : cumulative monthly shares traded (IBKR tier)
+    sigma           : daily volatility (e.g. 0.015 for 1.5%)
     """
     if toggles is None:
         toggles = SlippageToggles()
@@ -134,12 +136,12 @@ def calculate_costs(
     if toggles.market_impact and adv is not None and adv > 0:
         if asset_type == "stock":
             cb.market_impact_cost = _market_impact_stock(
-                quantity, price, adv
+                quantity, price, adv, sigma=sigma
             )
         else:
             # For options use underlying ADV with reduced impact
             cb.market_impact_cost = _market_impact_stock(
-                quantity * multiplier, price, adv, scale=0.3
+                quantity * multiplier, price, adv, scale=0.3, sigma=sigma
             )
 
     cb.total_cost = cb.spread_cost + cb.commission_cost + cb.market_impact_cost
@@ -181,18 +183,18 @@ def _ibkr_option_commission(contracts: float) -> float:
 # ── Market impact model ───────────────────────────────────────────────────────
 
 def _market_impact_stock(shares: float, price: float,
-                          adv: float, scale: float = 1.0) -> float:
+                          adv: float, scale: float = 1.0,
+                          sigma: float = 0.015) -> float:
     """
     Simplified square-root market impact model.
 
     impact_bps = scale * sigma * sqrt(quantity / ADV)
 
-    We proxy daily volatility (sigma) at 1.5% (roughly S&P average).
+    SIGMA defaults to 1.5% daily volatility proxy.
     Multiply by notional to get dollar impact (one-way), double for round-trip.
     """
-    SIGMA = 0.015   # 1.5% daily vol proxy
     participation = shares / adv
-    impact_pct = scale * SIGMA * math.sqrt(participation)
+    impact_pct = scale * sigma * math.sqrt(participation)
     notional    = shares * price
     return impact_pct * notional * 2   # round-trip
 

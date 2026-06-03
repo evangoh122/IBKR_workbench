@@ -48,5 +48,8 @@ Thumbs.db
 graphify-out/
 .planning/graphs/
 
+# Gemini
+.gemini
+
 # Jupyter
 .ipynb_checkpoints/

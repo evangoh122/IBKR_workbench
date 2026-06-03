@@ -65,21 +65,21 @@ def run_stock_etl(client: IBKRClient, tickers: List[str]) -> int:
             "open":    snap.get("open"),
             "high":    snap.get("high"),
             "low":     snap.get("low"),
+            "vwap":    snap.get("vwap"),
         })
 
     if not rows:
         logger.warning("No stock data received from TWS")
         return 0
 
-    conn = get_connection()
-    conn.executemany("""
-        INSERT INTO stock_quotes
-            (ticker, ts, bid, ask, last, close, volume, open, high, low)
-        VALUES
-            (:ticker, :ts, :bid, :ask, :last, :close, :volume, :open, :high, :low)
-    """, rows)
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        conn.executemany("""
+            INSERT INTO stock_quotes
+                (ticker, ts, bid, ask, last, close, volume, open, high, low, vwap)
+            VALUES
+                (:ticker, :ts, :bid, :ask, :last, :close, :volume, :open, :high, :low, :vwap)
+        """, rows)
+        conn.commit()
 
     logger.info(f"Wrote {len(rows)} stock quote rows")
     return len(rows)
