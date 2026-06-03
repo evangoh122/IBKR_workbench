@@ -2,13 +2,9 @@
 etl/chat_engine.py
 Natural-language chat interface over the IBKR/Polygon/EDGAR DuckDB database.
 
-Supports DeepSeek and Xiaomi MiMo (or any OpenAI-compatible endpoint).
-Configure via .env:
-  CHAT_PROVIDER = deepseek | mimo | custom
-  DEEPSEEK_API_KEY = ...
-  MIMO_API_KEY     = ...          # MiMo hosted endpoint key
-  MIMO_BASE_URL    = ...          # e.g. http://localhost:11434/v1 for Ollama
-  CHAT_MODEL       = override default model name
+Supports multiple AI providers — configure via .env:
+  CHAT_PROVIDER = deepseek | mimo | openai | anthropic | ollama
+  CHAT_MODEL    = optional model override
 """
 import os
 from typing import Optional
@@ -20,26 +16,42 @@ from loguru import logger
 
 DB_PATH = os.getenv("DB_PATH", "./data/ibkr.duckdb")
 
-# ── Provider config ───────────────────────────────────────────────────────────
+# ── Provider registry ─────────────────────────────────────────────────────────
 _PROVIDERS = {
     "deepseek": {
-        "base_url":  "https://api.deepseek.com",
-        "model":     "deepseek-chat",       # or "deepseek-reasoner" for R1
+        "base_url":    "https://api.deepseek.com",
+        "model":       "deepseek-chat",         # swap to "deepseek-reasoner" for R1
         "api_key_env": "DEEPSEEK_API_KEY",
     },
     "mimo": {
-        "base_url":  os.getenv("MIMO_BASE_URL", "http://localhost:11434/v1"),
-        "model":     "xiaomi/MiMo-7B-RL",   # Ollama model name
-        "api_key_env": "MIMO_API_KEY",       # set to "ollama" for local Ollama
+        "base_url":    os.getenv("MIMO_BASE_URL", "http://localhost:11434/v1"),
+        "model":       "xiaomi/MiMo-7B-RL",
+        "api_key_env": "MIMO_API_KEY",
+    },
+    "openai": {
+        "base_url":    "https://api.openai.com/v1",
+        "model":       "gpt-4o-mini",
+        "api_key_env": "OPENAI_API_KEY",
+    },
+    "anthropic": {
+        # Claude via OpenAI-compatible proxy (claude-code-proxy or litellm)
+        # Or use the native Anthropic SDK — see README for setup
+        "base_url":    "https://api.anthropic.com/v1",
+        "model":       "claude-3-5-haiku-20241022",
+        "api_key_env": "ANTHROPIC_API_KEY",
+    },
+    "ollama": {
+        "base_url":    os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+        "model":       os.getenv("OLLAMA_MODEL", "llama3.2"),
+        "api_key_env": None,   # no key needed
     },
 }
 
-_PROVIDER  = os.getenv("CHAT_PROVIDER", "deepseek").lower()
-_CFG       = _PROVIDERS.get(_PROVIDER, _PROVIDERS["deepseek"])
-_BASE_URL  = os.getenv("MIMO_BASE_URL" if _PROVIDER == "mimo" else "DEEPSEEK_BASE_URL",
-                        _CFG["base_url"])
-_MODEL     = os.getenv("CHAT_MODEL", _CFG["model"])
-_KEY_ENV   = _CFG["api_key_env"]
+_PROVIDER = os.getenv("CHAT_PROVIDER", "deepseek").lower()
+_CFG      = _PROVIDERS.get(_PROVIDER, _PROVIDERS["deepseek"])
+_BASE_URL = _CFG["base_url"]
+_MODEL    = os.getenv("CHAT_MODEL") or _CFG["model"]
+_KEY_ENV  = _CFG["api_key_env"]
 
 # ── Schema context fed to the LLM ────────────────────────────────────────────
 
@@ -94,9 +106,15 @@ Rules:
 # ── Client ────────────────────────────────────────────────────────────────────
 
 def _get_client() -> OpenAI:
-    api_key = os.getenv(_KEY_ENV, "ollama")   # "ollama" works for local Ollama
-    if not api_key:
-        raise ValueError(f"{_KEY_ENV} is not set in .env (CHAT_PROVIDER={_PROVIDER})")
+    if _KEY_ENV is None:
+        api_key = "ollama"   # Ollama doesn't need a real key
+    else:
+        api_key = os.getenv(_KEY_ENV, "")
+        if not api_key:
+            raise ValueError(
+                f"{_KEY_ENV} is not set in .env  (CHAT_PROVIDER={_PROVIDER})\n"
+                f"Add your API key or switch provider with CHAT_PROVIDER=ollama for local use."
+            )
     return OpenAI(api_key=api_key, base_url=_BASE_URL)
 
 
