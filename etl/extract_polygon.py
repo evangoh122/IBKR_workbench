@@ -234,6 +234,121 @@ def run_polygon_reference_etl(
     return total
 
 
+# ── Historical options OHLCV bars ────────────────────────────────────────────
+
+def run_polygon_option_bars_etl(
+    client: RESTClient,
+    tickers: List[dict],
+    timespan: str = "day",
+    lookback_days: int = 9500,
+    max_contracts: int = 250,
+) -> int:
+    """
+    Fetch historical OHLCV + VWAP bars for options contracts.
+
+    For each underlying:
+      1. List all available option contracts via polygon (active + expired)
+      2. Fetch daily bars for each contract
+      3. Upsert into polygon_option_bars
+
+    Scale note: each contract = 1 API call.  Limit tickers with
+    POLYGON_OPTION_BARS_TICKERS in .env (comma-separated, default = 12 liquid names).
+    """
+    from_ = (date.today() - timedelta(days=lookback_days)).isoformat()
+    to_   = date.today().isoformat()
+    total = 0
+
+    # Only equities — options on forex/futures handled separately
+    stk_tickers = [t for t in tickers if t.get("secType", "STK") == "STK"]
+
+    # Respect per-ticker override list
+    override = os.getenv("POLYGON_OPTION_BARS_TICKERS", "")
+    if override:
+        want = {s.strip().upper() for s in override.split(",")}
+        stk_tickers = [t for t in stk_tickers if t.get("symbol", "").upper() in want]
+
+    logger.info(
+        f"polygon option bars: fetching for {len(stk_tickers)} underlyings, "
+        f"up to {max_contracts} contracts each"
+    )
+
+    with get_connection() as conn:
+        for t_def in stk_tickers:
+            underlying  = t_def.get("symbol", "")
+            poly_ticker = _polygon_ticker(t_def)
+
+            # ── Step 1: list contracts ────────────────────────────────────
+            contracts = []
+            try:
+                time.sleep(_RATE_DELAY)
+                for contract in client.list_options_contracts(
+                    underlying_ticker=poly_ticker,
+                    expired=True,           # include expired for full history
+                    limit=max_contracts,
+                ):
+                    contracts.append(contract)
+                    if len(contracts) >= max_contracts:
+                        break
+            except Exception as e:
+                logger.warning(f"Couldn't list contracts for {underlying}: {e}")
+                continue
+
+            if not contracts:
+                logger.debug(f"{underlying}: no contracts returned")
+                continue
+
+            logger.info(f"{underlying}: {len(contracts)} contracts — fetching bars…")
+
+            # ── Step 2: bars per contract ─────────────────────────────────
+            ticker_rows = 0
+            for contract in contracts:
+                opt_ticker = getattr(contract, "ticker", None)
+                if not opt_ticker:
+                    continue
+
+                expiry = getattr(contract, "expiration_date", None)
+                strike = getattr(contract, "strike_price",    None)
+                right  = getattr(contract, "contract_type",   None)  # 'call' | 'put'
+
+                time.sleep(_RATE_DELAY)
+                try:
+                    aggs = client.get_aggs(
+                        opt_ticker, 1, timespan, from_, to_,
+                        adjusted=False,   # options are not split-adjusted
+                        limit=50000,
+                    )
+                    for a in aggs:
+                        ts = _ms_to_iso(getattr(a, "timestamp", None))
+                        conn.execute("""
+                            INSERT OR REPLACE INTO polygon_option_bars
+                                (option_ticker, underlying, expiry, strike, "right",
+                                 ts, timespan, open, high, low, close,
+                                 volume, vwap, transactions)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            opt_ticker, underlying, expiry, strike, right,
+                            ts, timespan,
+                            getattr(a, "open",         None),
+                            getattr(a, "high",         None),
+                            getattr(a, "low",          None),
+                            getattr(a, "close",        None),
+                            getattr(a, "volume",       None),
+                            getattr(a, "vwap",         None),
+                            getattr(a, "transactions", None),
+                        ))
+                        ticker_rows += 1
+
+                except Exception as e:
+                    logger.debug(f"  bars failed for {opt_ticker}: {e}")
+
+            conn.commit()
+            total += ticker_rows
+            logger.info(f"{underlying}: {ticker_rows} option bar rows written")
+
+    logger.info(f"polygon option bars ETL complete: {total} rows")
+    return total
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 # Free tier: 5 req/min → 13s between calls.  Paid tiers: set POLYGON_RATE_DELAY=0.1

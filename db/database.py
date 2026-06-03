@@ -188,6 +188,36 @@ def init_db():
             )
         """)
 
+        # ── Polygon: historical options OHLCV bars ───────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS polygon_option_bars (
+                option_ticker   TEXT    NOT NULL,   -- e.g. O:AAPL240119C00150000
+                underlying      TEXT    NOT NULL,
+                expiry          TEXT,               -- YYYY-MM-DD
+                strike          REAL,
+                "right"         TEXT,               -- 'call' | 'put'
+                ts              TEXT    NOT NULL,   -- bar open time, ISO-8601 UTC
+                timespan        TEXT    NOT NULL,   -- 'day' | 'minute'
+                open            REAL,
+                high            REAL,
+                low             REAL,
+                close           REAL,
+                volume          REAL,
+                vwap            REAL,
+                transactions    INTEGER,
+                created_at      TIMESTAMP DEFAULT now(),
+                UNIQUE(option_ticker, ts, timespan)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_pob_underlying
+                ON polygon_option_bars(underlying, expiry, strike, "right")
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_pob_ticker_ts
+                ON polygon_option_bars(option_ticker, ts)
+        """)
+
         # ── EDGAR: filing metadata ────────────────────────────────────────────
         conn.execute("""
             CREATE TABLE IF NOT EXISTS edgar_filings (

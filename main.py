@@ -40,8 +40,9 @@ POLL_SECS     = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
 LOG_LEVEL     = os.getenv("LOG_LEVEL", "INFO")
 EXPIRY_CYCLES = int(os.getenv("OPTIONS_EXPIRY_CYCLES", "2"))
 
-POLYGON_TIMESPAN = os.getenv("POLYGON_BARS_TIMESPAN", "day")
-POLYGON_LOOKBACK = int(os.getenv("POLYGON_BARS_LOOKBACK", "7"))
+POLYGON_TIMESPAN         = os.getenv("POLYGON_BARS_TIMESPAN", "day")
+POLYGON_LOOKBACK         = int(os.getenv("POLYGON_BARS_LOOKBACK", "9500"))
+POLYGON_OPT_MAX_CONTRACTS = int(os.getenv("POLYGON_OPTION_BARS_MAX_CONTRACTS", "250"))
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logger.remove()
@@ -61,6 +62,7 @@ from etl.extract_polygon import (
     run_polygon_bars_etl,
     run_polygon_snapshots_etl,
     run_polygon_options_etl,
+    run_polygon_option_bars_etl,
     run_polygon_reference_etl,
 )
 from etl.embed_tickers import run_embed_tickers_etl
@@ -147,6 +149,17 @@ def job_polygon_options():
     return run_polygon_options_etl(poly, TICKERS)
 
 
+@etl_job("polygon-option-bars")
+def job_polygon_option_bars():
+    poly = _polygon_client_or_exit()
+    return run_polygon_option_bars_etl(
+        poly, TICKERS,
+        timespan=POLYGON_TIMESPAN,
+        lookback_days=POLYGON_LOOKBACK,
+        max_contracts=POLYGON_OPT_MAX_CONTRACTS,
+    )
+
+
 @etl_job("polygon-ref")
 def job_polygon_reference():
     poly = _polygon_client_or_exit()
@@ -200,7 +213,7 @@ def main():
                         choices=[
                             "stocks", "options", "chain", "all",
                             "polygon", "polygon-bars", "polygon-quotes",
-                            "polygon-options", "polygon-ref",
+                            "polygon-options", "polygon-option-bars", "polygon-ref",
                             "embed-tickers", "embed-edgar",
                             "edgar-filings", "edgar-facts",
                         ],
@@ -219,7 +232,8 @@ def main():
         "polygon":         job_polygon_all,
         "polygon-bars":    job_polygon_bars,
         "polygon-quotes":  job_polygon_snapshots,
-        "polygon-options": job_polygon_options,
+        "polygon-options":      job_polygon_options,
+        "polygon-option-bars":  job_polygon_option_bars,
         "polygon-ref":     job_polygon_reference,
         "embed-tickers":   job_embed_tickers,
         "embed-edgar":     job_embed_edgar,
