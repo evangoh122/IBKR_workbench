@@ -65,6 +65,7 @@ from etl.extract_polygon import (
 )
 from etl.embed_tickers import run_embed_tickers_etl
 from etl.extract_edgar import run_edgar_filings_etl, run_edgar_facts_etl
+from etl.embed_edgar import run_embed_edgar_etl
 
 
 from functools import wraps
@@ -174,6 +175,11 @@ def job_edgar_facts():
     return run_edgar_facts_etl(TICKERS)
 
 
+@etl_job("embed-edgar")
+def job_embed_edgar():
+    return run_embed_edgar_etl(TICKER_SYMBOLS)
+
+
 def run_all(client: IBKRClient, refresh_chain: bool = False):
     if refresh_chain:
         logger.info("── Phase 1: Refreshing option chains ──")
@@ -195,7 +201,7 @@ def main():
                             "stocks", "options", "chain", "all",
                             "polygon", "polygon-bars", "polygon-quotes",
                             "polygon-options", "polygon-ref",
-                            "embed-tickers",
+                            "embed-tickers", "embed-edgar",
                             "edgar-filings", "edgar-facts",
                         ],
                         default="all")
@@ -216,6 +222,7 @@ def main():
         "polygon-options": job_polygon_options,
         "polygon-ref":     job_polygon_reference,
         "embed-tickers":   job_embed_tickers,
+        "embed-edgar":     job_embed_edgar,
         "edgar-filings":   job_edgar_filings,
         "edgar-facts":     job_edgar_facts,
     }

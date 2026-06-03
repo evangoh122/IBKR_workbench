@@ -248,6 +248,26 @@ def init_db():
                 WITH (metric = 'cosine')
             """)
         except Exception as e:
-            logger.warning(f"Failed to create HNSW index: {e}")
+            logger.warning(f"Failed to create HNSW index on ticker_embeddings: {e}")
+
+        conn.execute("""
+            CREATE SEQUENCE IF NOT EXISTS edgar_embeddings_id_seq;
+            CREATE TABLE IF NOT EXISTS edgar_embeddings (
+                id          INTEGER PRIMARY KEY DEFAULT nextval('edgar_embeddings_id_seq'),
+                ticker      TEXT,
+                accession   TEXT,
+                text        TEXT,
+                embedding   FLOAT[384],
+                updated_at  TIMESTAMP DEFAULT now()
+            )
+        """)
+        try:
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_edgar_emb 
+                ON edgar_embeddings USING HNSW (embedding) 
+                WITH (metric = 'cosine')
+            """)
+        except Exception as e:
+            logger.warning(f"Failed to create HNSW index on edgar_embeddings: {e}")
 
     logger.info(f"Database initialised at {DB_PATH}")
