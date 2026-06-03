@@ -38,7 +38,7 @@ def run_polygon_bars_etl(
             try:
                 aggs = client.get_aggs(
                     _polygon_ticker(t_def), 1, timespan, from_, to_,
-                    adjusted=True, limit=5000,
+                    adjusted=True, limit=50000,  # polygon max — covers 25+ years of daily bars
                 )
                 rows = 0
                 time.sleep(_RATE_DELAY)
