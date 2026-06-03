@@ -29,6 +29,24 @@ _PROVIDERS = {
         "api_key_env": "MIMO_API_KEY",
         "allow_blank_key": True,
     },
+    "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o",
+        "api_key_env": "OPENAI_API_KEY",
+        "allow_blank_key": False,
+    },
+    "anthropic": {
+        "base_url": "https://api.anthropic.com/v1",  # Note: chat_engine uses OpenAI client; Anthropic needs shim or different wrapper if raw
+        "model": "claude-3-5-sonnet-20240620",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "allow_blank_key": False,
+    },
+    "ollama": {
+        "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+        "model": os.getenv("OLLAMA_MODEL", "llama3.2"),
+        "api_key_env": "OLLAMA_API_KEY",
+        "allow_blank_key": True,
+    },
 }
 
 _PROVIDER = os.getenv("CHAT_PROVIDER", "deepseek").lower()
