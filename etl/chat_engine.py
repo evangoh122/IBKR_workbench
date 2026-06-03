@@ -1,94 +1,66 @@
 """
-etl/chat_engine.py
 Natural-language chat interface over the IBKR/Polygon/EDGAR DuckDB database.
 
-Supports multiple AI providers — configure via .env:
-  CHAT_PROVIDER = deepseek | mimo | openai | anthropic | ollama
+Supported providers:
+  CHAT_PROVIDER = deepseek | mimo
   CHAT_MODEL    = optional model override
 """
 import os
+import re
 from typing import Optional
 
 import duckdb
 import pandas as pd
-from openai import OpenAI
 from loguru import logger
+from openai import OpenAI
 
 DB_PATH = os.getenv("DB_PATH", "./data/ibkr.duckdb")
 
-# ── Provider registry ─────────────────────────────────────────────────────────
 _PROVIDERS = {
     "deepseek": {
-        "base_url":    "https://api.deepseek.com",
-        "model":       "deepseek-chat",         # swap to "deepseek-reasoner" for R1
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-chat",
         "api_key_env": "DEEPSEEK_API_KEY",
+        "allow_blank_key": False,
     },
     "mimo": {
-        "base_url":    os.getenv("MIMO_BASE_URL", "http://localhost:11434/v1"),
-        "model":       "xiaomi/MiMo-7B-RL",
+        "base_url": os.getenv("MIMO_BASE_URL", "http://localhost:11434/v1"),
+        "model": os.getenv("MIMO_MODEL", "xiaomi/MiMo-7B-RL"),
         "api_key_env": "MIMO_API_KEY",
-    },
-    "openai": {
-        "base_url":    "https://api.openai.com/v1",
-        "model":       "gpt-4o-mini",
-        "api_key_env": "OPENAI_API_KEY",
-    },
-    "anthropic": {
-        # Claude via OpenAI-compatible proxy (claude-code-proxy or litellm)
-        # Or use the native Anthropic SDK — see README for setup
-        "base_url":    "https://api.anthropic.com/v1",
-        "model":       "claude-3-5-haiku-20241022",
-        "api_key_env": "ANTHROPIC_API_KEY",
-    },
-    "ollama": {
-        "base_url":    os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
-        "model":       os.getenv("OLLAMA_MODEL", "llama3.2"),
-        "api_key_env": None,   # no key needed
+        "allow_blank_key": True,
     },
 }
 
 _PROVIDER = os.getenv("CHAT_PROVIDER", "deepseek").lower()
-_CFG      = _PROVIDERS.get(_PROVIDER, _PROVIDERS["deepseek"])
+_CFG = _PROVIDERS.get(_PROVIDER, _PROVIDERS["deepseek"])
 _BASE_URL = _CFG["base_url"]
-_MODEL    = os.getenv("CHAT_MODEL") or _CFG["model"]
-_KEY_ENV  = _CFG["api_key_env"]
-
-# ── Schema context fed to the LLM ────────────────────────────────────────────
+_MODEL = os.getenv("CHAT_MODEL") or _CFG["model"]
+_KEY_ENV = _CFG["api_key_env"]
 
 SCHEMA = """
 You have access to a DuckDB financial database with these tables:
 
-**IBKR live data**
+IBKR live data:
 - stock_quotes(ticker, ts, bid, ask, last, close, open, high, low, volume, vwap, created_at)
-  Live IBKR stock snapshots. ts is ISO-8601 UTC.
 - option_quotes(ticker, expiry, strike, right, ts, bid, ask, last, volume, open_interest, implied_vol, delta, gamma, theta, vega, und_price, pv_dividend)
-  right is 'C' (call) or 'P' (put). expiry is YYYYMMDD.
 - option_chains(ticker, expiry, strike, right, exchange, fetched_at)
-  Metadata: all available option contracts per ticker.
 - etl_runs(id, run_type, status, rows_written, started_at, finished_at, message)
-  ETL job audit log.
 
-**Polygon historical data**
+Polygon historical data:
 - polygon_bars(ticker, ts, timespan, open, high, low, close, volume, vwap, transactions)
-  Daily OHLCV+VWAP bars. timespan='day' for daily data.
 - polygon_snapshots(ticker, ts, bid, ask, last, prev_close, day_volume)
-  Delayed/EOD stock snapshots.
 - polygon_option_snapshots(underlying, expiry, strike, right, ts, day_open, day_close, day_volume, open_interest, implied_vol, delta, gamma, theta, vega)
 - polygon_tickers(ticker, name, market, primary_exchange, type, active, currency, description)
-  Reference data: company names, exchanges, descriptions.
 
-**SEC EDGAR financials**
+SEC EDGAR financials:
 - edgar_filings(ticker, cik, form_type, filed_date, accession_number, primary_doc)
-  10-K / 10-Q / 8-K filing history.
 - edgar_facts(ticker, cik, taxonomy, concept, label, unit, value, period_start, period_end, form_type, filed_date)
-  XBRL financial facts. Key concepts: 'Revenues', 'NetIncomeLoss', 'EarningsPerShareDiluted',
-  'Assets', 'Liabilities', 'StockholdersEquity', 'CashAndCashEquivalentsAtCarryingValue'.
 
-**Notes**
-- Use DuckDB SQL syntax (not SQLite). Use QUALIFY for window deduplication.
+Notes:
+- Use DuckDB SQL syntax.
 - Dates are stored as TEXT in ISO-8601 format. Cast with ::TIMESTAMP or ::DATE as needed.
 - Always LIMIT results to 100 rows unless the user asks for more.
-- For "latest" queries use: QUALIFY ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY ts DESC) = 1
+- For latest queries use QUALIFY ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY ts DESC) = 1.
 """
 
 SYSTEM_PROMPT = f"""You are a financial data analyst assistant. The user will ask questions about their market data.
@@ -96,48 +68,30 @@ SYSTEM_PROMPT = f"""You are a financial data analyst assistant. The user will as
 {SCHEMA}
 
 Rules:
-1. If the question requires data, respond with ONLY a valid DuckDB SQL query — no markdown, no explanation.
+1. If the question requires data, respond with ONLY a valid DuckDB SQL query. No markdown, no explanation.
 2. If the question is conversational or cannot be answered with SQL, respond with a plain English answer starting with "ANSWER:".
 3. Never make up data. Only query what exists in the schema above.
 4. Keep SQL readable and add brief inline comments for complex logic.
+5. Only generate read-only SELECT or WITH queries.
 """
 
 
-# ── Client ────────────────────────────────────────────────────────────────────
-
 def _get_client() -> OpenAI:
-    if _KEY_ENV is None:
-        api_key = "ollama"   # Ollama doesn't need a real key
-    else:
-        api_key = os.getenv(_KEY_ENV, "")
-        if not api_key:
-            raise ValueError(
-                f"{_KEY_ENV} is not set in .env  (CHAT_PROVIDER={_PROVIDER})\n"
-                f"Add your API key or switch provider with CHAT_PROVIDER=ollama for local use."
-            )
-    return OpenAI(api_key=api_key, base_url=_BASE_URL)
+    api_key = os.getenv(_KEY_ENV, "")
+    if not api_key and not _CFG["allow_blank_key"]:
+        raise ValueError(
+            f"{_KEY_ENV} is not set in .env (CHAT_PROVIDER={_PROVIDER})."
+        )
+    return OpenAI(api_key=api_key or "local", base_url=_BASE_URL)
 
 
-# ── Core chat function ────────────────────────────────────────────────────────
-
-def chat(
-    question: str,
-    history: Optional[list] = None,
-    max_rows: int = 100,
-) -> dict:
+def chat(question: str, history: Optional[list] = None, max_rows: int = 100) -> dict:
     """
     Ask a natural-language question about the database.
 
-    Returns:
-        {
-            "type":    "table" | "text" | "error",
-            "sql":     str | None,
-            "data":    pd.DataFrame | None,
-            "answer":  str,
-        }
+    Returns a dict with type, sql, data, and answer fields.
     """
     client = _get_client()
-
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
         messages.extend(history)
@@ -147,53 +101,77 @@ def chat(
         response = client.chat.completions.create(
             model=_MODEL,
             messages=messages,
-            temperature=0.1,   # low temp for deterministic SQL
+            temperature=0.1,
             max_tokens=1024,
         )
         reply = response.choices[0].message.content.strip()
     except Exception as e:
-        logger.error(f"DeepSeek API error: {e}")
+        logger.error(f"{_PROVIDER} API error: {e}")
         return {"type": "error", "sql": None, "data": None, "answer": f"API error: {e}"}
 
-    # Plain-text answer (non-SQL response)
     if reply.startswith("ANSWER:"):
         return {
-            "type":   "text",
-            "sql":    None,
-            "data":   None,
+            "type": "text",
+            "sql": None,
+            "data": None,
             "answer": reply[len("ANSWER:"):].strip(),
         }
 
-    # SQL response — execute it
     sql = _clean_sql(reply)
+    validation_error = _validate_read_only_sql(sql)
+    if validation_error:
+        return {"type": "error", "sql": sql, "data": None, "answer": validation_error}
+
     try:
-        conn = duckdb.connect(DB_PATH, read_only=True)
-        df   = conn.execute(sql).df()
-        conn.close()
-
-        if df.empty:
-            answer = "The query returned no results."
-        else:
-            answer = _summarise(client, question, df)
-
-        return {"type": "table", "sql": sql, "data": df.head(max_rows), "answer": answer}
-
+        with duckdb.connect(DB_PATH, read_only=True) as conn:
+            df = conn.execute(f"SELECT * FROM ({sql}) AS chat_result LIMIT ?", (max_rows,)).df()
     except Exception as e:
         logger.warning(f"SQL execution failed: {e}\nSQL: {sql}")
         return {"type": "error", "sql": sql, "data": None, "answer": f"SQL error: {e}"}
 
+    answer = "The query returned no results." if df.empty else _summarise(client, question, df)
+    return {"type": "table", "sql": sql, "data": df.head(max_rows), "answer": answer}
+
 
 def _clean_sql(text: str) -> str:
-    """Strip markdown code fences if the model added them."""
     text = text.strip()
     if text.startswith("```"):
         lines = text.splitlines()
-        text  = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+        text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
     return text.strip()
 
 
+def _strip_sql_comments(sql: str) -> str:
+    sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
+    sql = re.sub(r"--[^\n\r]*", " ", sql)
+    return sql.strip()
+
+
+def _validate_read_only_sql(sql: str) -> Optional[str]:
+    compact = _strip_sql_comments(sql)
+    if not compact:
+        return "The model did not return a SQL query."
+    if ";" in compact:
+        return "Rejected SQL with semicolons or multiple statements."
+
+    first = compact.lstrip().split(None, 1)[0].lower()
+    if first not in {"select", "with"}:
+        return "Rejected SQL because only SELECT and WITH queries are allowed."
+
+    blocked = {
+        "attach", "call", "copy", "create", "delete", "detach", "drop",
+        "export", "from_csv", "glob", "httpfs", "import", "insert",
+        "install", "load", "pragma", "read_blob", "read_csv", "read_json",
+        "read_parquet", "read_text", "set", "update",
+    }
+    tokens = set(re.findall(r"\b[a-z_][a-z0-9_]*\b", compact.lower()))
+    found = sorted(tokens & blocked)
+    if found:
+        return f"Rejected SQL containing blocked keyword/function: {', '.join(found)}."
+    return None
+
+
 def _summarise(client: OpenAI, question: str, df: pd.DataFrame) -> str:
-    """Ask DeepSeek to write a one-sentence plain-English summary of the results."""
     preview = df.head(5).to_markdown(index=False)
     try:
         resp = client.chat.completions.create(
@@ -201,7 +179,7 @@ def _summarise(client: OpenAI, question: str, df: pd.DataFrame) -> str:
             messages=[{
                 "role": "user",
                 "content": (
-                    f"The user asked: \"{question}\"\n\n"
+                    f'The user asked: "{question}"\n\n'
                     f"Query returned {len(df)} rows. Here are the first 5:\n{preview}\n\n"
                     "Write a concise 1-2 sentence plain-English answer. No markdown."
                 ),

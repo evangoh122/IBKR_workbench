@@ -71,7 +71,6 @@ st.markdown(f"""
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
-@st.cache_resource
 def get_conn():
     if not Path(DB_PATH).exists():
         return None
@@ -86,6 +85,8 @@ def q(sql: str, params=()) -> pd.DataFrame:
         return conn.execute(sql, list(params)).df()
     except Exception:
         return pd.DataFrame()
+    finally:
+        conn.close()
 
 
 def no_db():
@@ -123,7 +124,8 @@ if page == "💬 Chat":
     chat_mode = st.radio("Chat Mode", ["Database (SQL)", "Knowledge Base (RAG)"], horizontal=True, 
                          help="Database mode generates SQL to query numerical data. RAG mode searches SEC filings and ticker descriptions.")
     
-    st.caption("Ask anything about your stocks, options, EDGAR financials, or Polygon history. Powered by DeepSeek.")
+    provider = os.getenv("CHAT_PROVIDER", "deepseek").lower()
+    st.caption(f"Ask anything about your stocks, options, EDGAR financials, or Polygon history. Powered by {provider.title()}.")
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []   # list of {role, content}
