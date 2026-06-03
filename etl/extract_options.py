@@ -46,7 +46,7 @@ def refresh_option_chains(client: IBKRClient, tickers: List[str]) -> int:
                               for (_, exp, strike, right) in chain]
 
             conn.executemany("""
-                INSERT OR REPLACE INTO option_chains (ticker, expiry, strike, right)
+                INSERT OR REPLACE INTO option_chains (ticker, expiry, strike, "right")
                 VALUES (?, ?, ?, ?)
             """, [(ticker, exp, strike, right) for (exp, strike, right) in rows])
             conn.commit()
@@ -74,7 +74,7 @@ def run_option_etl(client: IBKRClient, tickers: List[str],
                 SELECT DISTINCT expiry FROM option_chains
                 WHERE ticker = ?
                 ORDER BY expiry ASC
-            """, (ticker,)).fetchall()
+            """, (ticker,)).df().to_dict('records')
 
             expiries = [r["expiry"] for r in rows][:get_expiry_cycles(ticker, expiry_cycles)]
             if not expiries:
@@ -83,10 +83,10 @@ def run_option_etl(client: IBKRClient, tickers: List[str],
 
             for expiry in expiries:
                 strikes = conn.execute("""
-                    SELECT strike, right FROM option_chains
+                    SELECT strike, "right" FROM option_chains
                     WHERE ticker=? AND expiry=?
                     ORDER BY strike
-                """, (ticker, expiry)).fetchall()
+                """, (ticker, expiry)).df().to_dict('records')
                 for s in strikes:
                     contracts_to_quote.append((ticker, expiry, s["strike"], s["right"]))
 
@@ -167,13 +167,13 @@ def run_option_etl(client: IBKRClient, tickers: List[str],
     with get_connection() as conn:
         conn.executemany("""
             INSERT INTO option_quotes
-                (ticker, expiry, strike, right, ts, bid, ask, last,
+                (ticker, expiry, strike, "right", ts, bid, ask, last,
                  volume, open_interest, implied_vol, delta, gamma, theta, vega,
                  und_price, pv_dividend)
             VALUES
-                (:ticker, :expiry, :strike, :right, :ts, :bid, :ask, :last,
-                 :volume, :open_interest, :implied_vol, :delta, :gamma, :theta, :vega,
-                 :und_price, :pv_dividend)
+                ($ticker, $expiry, $strike, $right, $ts, $bid, $ask, $last,
+                 $volume, $open_interest, $implied_vol, $delta, $gamma, $theta, $vega,
+                 $und_price, $pv_dividend)
         """, all_rows)
         conn.commit()
 

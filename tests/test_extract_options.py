@@ -56,9 +56,8 @@ def test_refresh_option_chains_stores_entries(tmp_db):
 
     assert total == 4
 
-    conn = get_connection()
-    rows = conn.execute("SELECT * FROM option_chains WHERE ticker='AAPL'").fetchall()
-    conn.close()
+    with get_connection() as conn:
+        rows = conn.execute("SELECT * FROM option_chains WHERE ticker='AAPL'").fetchall()
     assert len(rows) == 4
 
 
@@ -69,11 +68,10 @@ def test_refresh_option_chains_upserts(tmp_db):
     refresh_option_chains(client, ["AAPL"])
     refresh_option_chains(client, ["AAPL"])
 
-    conn = get_connection()
-    count = conn.execute(
-        "SELECT COUNT(*) FROM option_chains WHERE ticker='AAPL'"
-    ).fetchone()[0]
-    conn.close()
+    with get_connection() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM option_chains WHERE ticker='AAPL'"
+        ).fetchone()[0]
     assert count == 1
 
 
@@ -87,16 +85,14 @@ def test_refresh_empty_chain(tmp_db):
 # ── Option quote tests ────────────────────────────────────────────────────────
 
 def _seed_chain(db_path, ticker, expiry, strikes, rights=("C", "P")):
-    import sqlite3
-    conn = sqlite3.connect(db_path)
-    for strike in strikes:
-        for right in rights:
-            conn.execute(
-                "INSERT OR REPLACE INTO option_chains (ticker,expiry,strike,right) VALUES (?,?,?,?)",
-                (ticker, expiry, strike, right)
-            )
-    conn.commit()
-    conn.close()
+    import duckdb
+    with duckdb.connect(db_path) as conn:
+        for strike in strikes:
+            for right in rights:
+                conn.execute(
+                    'INSERT OR REPLACE INTO option_chains (ticker,expiry,strike,"right") VALUES (?,?,?,?)',
+                    (ticker, expiry, strike, right)
+                )
 
 
 def test_run_option_etl_writes_rows(tmp_db):
@@ -137,9 +133,8 @@ def test_run_option_etl_writes_rows(tmp_db):
 
     assert rows == 4
 
-    conn = get_connection()
-    db_rows = conn.execute("SELECT * FROM option_quotes").fetchall()
-    conn.close()
+    with get_connection() as conn:
+        db_rows = conn.execute("SELECT * FROM option_quotes").fetchall()
     assert len(db_rows) == 4
 
 
@@ -157,9 +152,9 @@ def test_run_option_etl_greeks_stored(tmp_db):
     client = _make_quote_client(snapshots)
     run_option_etl(client, ["AAPL"], expiry_cycles=1)
 
-    conn = get_connection()
-    row = conn.execute("SELECT * FROM option_quotes LIMIT 1").fetchone()
-    conn.close()
+    with get_connection() as conn:
+        df = conn.execute("SELECT * FROM option_quotes LIMIT 1").df()
+    row = df.iloc[0]
 
     assert row["delta"]       == pytest.approx(0.55)
     assert row["implied_vol"] == pytest.approx(0.28)

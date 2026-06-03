@@ -50,8 +50,8 @@ import db.database as db_module
 
 @pytest.fixture
 def tmp_db(tmp_path, monkeypatch):
-    """Isolated SQLite DB for each test — patches DB_PATH everywhere."""
-    db_file = str(tmp_path / "test_ibkr.db")
+    """Isolated DuckDB for each test — patches DB_PATH everywhere."""
+    db_file = str(tmp_path / "test_ibkr.duckdb")
     monkeypatch.setenv("DB_PATH", db_file)
     monkeypatch.setattr(db_module, "DB_PATH", db_file)
 

@@ -77,7 +77,7 @@ def run_stock_etl(client: IBKRClient, tickers: List[str]) -> int:
             INSERT INTO stock_quotes
                 (ticker, ts, bid, ask, last, close, volume, open, high, low, vwap)
             VALUES
-                (:ticker, :ts, :bid, :ask, :last, :close, :volume, :open, :high, :low, :vwap)
+                ($ticker, $ts, $bid, $ask, $last, $close, $volume, $open, $high, $low, $vwap)
         """, rows)
         conn.commit()
 

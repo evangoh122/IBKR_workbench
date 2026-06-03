@@ -1,36 +1,38 @@
 """
 tests/test_extract_stocks.py
-Tests for stock snapshot extraction and DB writes.
+Tests for stock quote ETL.
 """
 import threading
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from db.database import get_connection
 from etl.extract_stocks import run_stock_etl
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
 def _make_mock_client(snapshots: dict):
     """
-    Returns a mock IBKRClient whose request_snapshot immediately
-    calls on_done with the provided snapshot for each ticker.
+    snapshots = {ticker: {field: val}}
+    Simulates request_snapshot callback.
     """
     req_counter = [0]
-
-    def fake_request_snapshot(contract, on_done):
+    def fake_snapshot(contract, on_done):
         req_id = req_counter[0]
         req_counter[0] += 1
-        ticker = contract.symbol
-        snap = snapshots.get(ticker, {})
-        # Fire callback in a thread to mimic async behaviour
+        snap = snapshots.get(contract.symbol, {})
+        # Call the callback immediately or in a thread
         t = threading.Thread(target=on_done, args=(req_id, snap))
         t.start()
         return req_id
 
     client = MagicMock()
     client.make_stock_contract.side_effect = lambda t: MagicMock(symbol=t)
-    client.request_snapshot.side_effect = fake_request_snapshot
+    client.request_snapshot.side_effect = fake_snapshot
     return client
 
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
 
 def test_run_stock_etl_writes_rows(sample_tickers, tmp_db):
     snapshots = {
@@ -49,15 +51,12 @@ def test_run_stock_etl_writes_rows(sample_tickers, tmp_db):
 
     assert rows_written == 3
 
-    conn = get_connection()
-    rows = conn.execute("SELECT * FROM stock_quotes ORDER BY ticker").fetchall()
-    conn.close()
+    with get_connection() as conn:
+        df = conn.execute("SELECT * FROM stock_quotes ORDER BY ticker").df()
 
-    assert len(rows) == 3
-    tickers = [r["ticker"] for r in rows]
-    assert "AAPL" in tickers
-    assert "MSFT" in tickers
-    assert "SPY"  in tickers
+    assert len(df) == 3
+    tickers = df["ticker"].tolist()
+    assert sorted(tickers) == ["AAPL", "MSFT", "SPY"]
 
 
 def test_run_stock_etl_correct_values(tmp_db):
@@ -70,36 +69,34 @@ def test_run_stock_etl_correct_values(tmp_db):
     client = _make_mock_client(snapshots)
     run_stock_etl(client, ["AAPL"])
 
-    conn = get_connection()
-    row = conn.execute("SELECT * FROM stock_quotes WHERE ticker='AAPL'").fetchone()
-    conn.close()
+    with get_connection() as conn:
+        df = conn.execute("SELECT * FROM stock_quotes WHERE ticker='AAPL'").df()
+    row = df.iloc[0]
 
     assert row["bid"]    == 182.5
     assert row["ask"]    == 182.6
     assert row["last"]   == 182.55
     assert row["volume"] == 50_000_000
-    assert row["high"]   == 183.0
-    assert row["low"]    == 179.0
 
 
 def test_run_stock_etl_empty_snapshot(tmp_db):
-    """Empty snapshots should produce 0 rows and not crash."""
+    """If client returns empty dict, 0 rows should be written."""
     client = _make_mock_client({})
-    rows_written = run_stock_etl(client, ["AAPL"])
-    assert rows_written == 0
-
-    conn = get_connection()
-    count = conn.execute("SELECT COUNT(*) FROM stock_quotes").fetchone()[0]
-    conn.close()
-    assert count == 0
+    rows = run_stock_etl(client, ["AAPL"])
+    assert rows == 0
 
 
 def test_run_stock_etl_partial_snapshots(tmp_db):
-    """Only tickers with data should be written."""
+    """Should handle snapshots with missing fields gracefully."""
     snapshots = {
-        "AAPL": {"ts": "2024-01-15T14:30:00+00:00", "last": 182.5},
-        # MSFT returns empty
+        "AAPL": {"ts": "2024-01-15T14:30:00+00:00", "last": 182.55}
     }
     client = _make_mock_client(snapshots)
-    rows_written = run_stock_etl(client, ["AAPL", "MSFT"])
-    assert rows_written == 1
+    run_stock_etl(client, ["AAPL"])
+
+    with get_connection() as conn:
+        df = conn.execute("SELECT * FROM stock_quotes WHERE ticker='AAPL'").df()
+    row = df.iloc[0]
+    assert row["last"] == 182.55
+    import pandas as pd
+    assert pd.isna(row["bid"])

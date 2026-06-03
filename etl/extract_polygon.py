@@ -138,7 +138,7 @@ def run_polygon_options_etl(
 
                     conn.execute("""
                         INSERT INTO polygon_option_snapshots
-                            (underlying, expiry, strike, right, ts,
+                            (underlying, expiry, strike, "right", ts,
                              day_open, day_close, day_volume,
                              open_interest, implied_vol,
                              delta, gamma, theta, vega)

@@ -12,6 +12,9 @@ Usage:
     python main.py --job polygon-quotes  # polygon stock snapshots only
     python main.py --job polygon-options # polygon options chain only
     python main.py --job polygon-ref     # polygon ticker reference only
+    python main.py --job embed-tickers   # embed polygon descriptions → DuckDB vector store
+    python main.py --job edgar-filings   # EDGAR filing history (10-K, 10-Q, 8-K)
+    python main.py --job edgar-facts     # EDGAR XBRL financial facts
     python main.py --schedule            # continuous mode, respects POLL_INTERVAL_SECONDS
 """
 import argparse
@@ -59,6 +62,9 @@ from etl.extract_polygon import (
     run_polygon_options_etl,
     run_polygon_reference_etl,
 )
+from db.vector_store import init_vector_db
+from etl.embed_tickers import run_embed_tickers_etl
+from etl.extract_edgar import run_edgar_filings_etl, run_edgar_facts_etl
 
 
 from functools import wraps
@@ -153,6 +159,21 @@ def job_polygon_all():
     job_polygon_options()
 
 
+@etl_job("embed-tickers")
+def job_embed_tickers():
+    return run_embed_tickers_etl()
+
+
+@etl_job("edgar-filings")
+def job_edgar_filings():
+    return run_edgar_filings_etl(TICKERS)
+
+
+@etl_job("edgar-facts")
+def job_edgar_facts():
+    return run_edgar_facts_etl(TICKERS)
+
+
 def run_all(client: IBKRClient, refresh_chain: bool = False):
     if refresh_chain:
         logger.info("── Phase 1: Refreshing option chains ──")
@@ -174,6 +195,8 @@ def main():
                             "stocks", "options", "chain", "all",
                             "polygon", "polygon-bars", "polygon-quotes",
                             "polygon-options", "polygon-ref",
+                            "embed-tickers",
+                            "edgar-filings", "edgar-facts",
                         ],
                         default="all")
     parser.add_argument("--schedule", action="store_true",
@@ -182,16 +205,20 @@ def main():
                         help="Re-fetch option chain metadata before quoting")
     args = parser.parse_args()
 
-    # Initialise DB
+    # Initialise databases
     init_db()
+    init_vector_db()
 
-    # Polygon-only jobs don't need a TWS connection
+    # Jobs that don't need a TWS connection
     polygon_only_jobs = {
         "polygon":         job_polygon_all,
         "polygon-bars":    job_polygon_bars,
         "polygon-quotes":  job_polygon_snapshots,
         "polygon-options": job_polygon_options,
         "polygon-ref":     job_polygon_reference,
+        "embed-tickers":   job_embed_tickers,
+        "edgar-filings":   job_edgar_filings,
+        "edgar-facts":     job_edgar_facts,
     }
     if args.job in polygon_only_jobs:
         fn = polygon_only_jobs[args.job]
@@ -243,10 +270,6 @@ def main():
             client.disconnect_and_stop()
 
     client.disconnect_and_stop()
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 if __name__ == "__main__":
