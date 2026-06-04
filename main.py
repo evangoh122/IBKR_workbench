@@ -31,7 +31,6 @@ import os
 import sys
 import time
 import warnings
-from datetime import datetime, timezone
 from functools import wraps
 
 # Suppress specific Python 3.14 / dependency warnings
@@ -56,7 +55,8 @@ LOG_LEVEL     = os.getenv("LOG_LEVEL", "INFO")
 EXPIRY_CYCLES = int(os.getenv("OPTIONS_EXPIRY_CYCLES", "2"))
 
 POLYGON_TIMESPAN              = os.getenv("POLYGON_BARS_TIMESPAN", "day")
-POLYGON_LOOKBACK              = int(os.getenv("POLYGON_BARS_LOOKBACK", "1825"))  # 5 years
+POLYGON_LOOKBACK              = int(os.getenv("POLYGON_BARS_LOOKBACK", "1825"))       # 5 years — bars only
+POLYGON_OPT_LOOKBACK          = int(os.getenv("POLYGON_OPTION_BARS_LOOKBACK", "730")) # 2 years — options only
 POLYGON_OPT_MAX_CONTRACTS     = int(os.getenv("POLYGON_OPTION_BARS_MAX_CONTRACTS", "1000"))
 POLYGON_OPTIONS_MAX_CONTRACTS = int(os.getenv("POLYGON_OPTIONS_MAX_CONTRACTS", "2000"))
 POLYGON_START_DATE            = os.getenv("START_DATE", "") or None
@@ -87,7 +87,9 @@ if _tick_watchlist:
     _want_tick = {s.strip().upper() for s in _tick_watchlist.split(",")}
     POLYGON_TICK_TICKERS = [t for t in TICKERS if t.get("symbol", "").upper() in _want_tick]
 elif _polygon_groups:
-    # When filtering by groups, use same tickers for both day and tick data
+    # When filtering by groups, use same tickers for tick data — ensure POLYGON_TICK_TICKERS
+    # is set explicitly via env var if tick volume is a concern
+    logger.warning(f"POLYGON_TICK_TICKERS not set — tick data will run for all {len(TICKERS)} group tickers. Set POLYGON_TICK_TICKERS to limit scope.")
     POLYGON_TICK_TICKERS = TICKERS
 else:
     POLYGON_TICK_TICKERS = POLYGON_TICKERS
@@ -209,7 +211,7 @@ def job_polygon_option_bars():
     return run_polygon_option_bars_etl(
         poly, POLYGON_TICKERS,
         timespan=POLYGON_TIMESPAN,
-        lookback_days=POLYGON_LOOKBACK,
+        lookback_days=POLYGON_OPT_LOOKBACK,
         max_contracts=POLYGON_OPT_MAX_CONTRACTS,
     )
 
@@ -241,19 +243,17 @@ def job_polygon_semis():
         logger.error("polygon-semis requires START_DATE and END_DATE in .env")
         return 0
     poly = _polygon_client_or_exit()
-    # Run day bars
     bars_count = run_polygon_bars_etl(
-        poly, TICKERS, POLYGON_TIMESPAN, POLYGON_LOOKBACK,
+        poly, POLYGON_TICKERS, POLYGON_TIMESPAN, POLYGON_LOOKBACK,
         from_date=POLYGON_START_DATE, to_date=POLYGON_END_DATE,
     )
-    # Run tick data
     ticks_count = run_polygon_ticks_etl(
-        poly, TICKERS,
+        poly, POLYGON_TICK_TICKERS,
         from_date=POLYGON_START_DATE,
         to_date=POLYGON_END_DATE,
         max_per_ticker=POLYGON_TICK_MAX,
     )
-    return bars_count + ticks_count
+    return (bars_count or 0) + (ticks_count or 0)
 
 
 def job_polygon_all():
