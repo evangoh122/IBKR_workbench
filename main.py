@@ -15,6 +15,7 @@ Usage:
     python main.py --job embed-tickers   # embed polygon descriptions → DuckDB vector store
     python main.py --job edgar-filings   # EDGAR filing history (10-K, 10-Q, 8-K)
     python main.py --job edgar-facts     # EDGAR XBRL financial facts
+    python main.py --job cot             # CFTC COT reports
     python main.py --schedule            # continuous mode, respects POLL_INTERVAL_SECONDS
 """
 import argparse
@@ -47,7 +48,7 @@ LOG_LEVEL     = os.getenv("LOG_LEVEL", "INFO")
 EXPIRY_CYCLES = int(os.getenv("OPTIONS_EXPIRY_CYCLES", "2"))
 
 POLYGON_TIMESPAN              = os.getenv("POLYGON_BARS_TIMESPAN", "day")
-POLYGON_LOOKBACK              = int(os.getenv("POLYGON_BARS_LOOKBACK", "9500"))
+POLYGON_LOOKBACK              = int(os.getenv("POLYGON_BARS_LOOKBACK", "730"))
 POLYGON_OPT_MAX_CONTRACTS     = int(os.getenv("POLYGON_OPTION_BARS_MAX_CONTRACTS", "1000"))
 POLYGON_OPTIONS_MAX_CONTRACTS = int(os.getenv("POLYGON_OPTIONS_MAX_CONTRACTS", "2000"))
 POLYGON_START_DATE            = os.getenv("START_DATE", "") or None
@@ -260,6 +261,9 @@ def run_all(client: IBKRClient, refresh_chain: bool = False):
 
     logger.info("── Phase 3: Option quotes ──")
     job_options(client)
+
+    logger.info("── Phase 4: COT reports ──")
+    job_cot()
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
