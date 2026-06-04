@@ -136,12 +136,12 @@ class EDGARFactsRetriever(BaseRetriever):
     ) -> List[Document]:
         try:
             with duckdb.connect(DB_PATH, read_only=True) as conn:
-                # Find tickers mentioned in the query (case-insensitive symbol match)
-                all_tickers = conn.execute(
-                    "SELECT ticker FROM polygon_tickers"
-                ).fetchall()
+                # Find tickers mentioned in the query (SQL substring match)
                 query_upper = query.upper()
-                found = [r[0] for r in all_tickers if r[0] in query_upper]
+                found = [r[0] for r in conn.execute(
+                    "SELECT ticker FROM polygon_tickers WHERE INSTR(?, ticker) > 0",
+                    [query_upper]
+                ).fetchall()]
 
                 if not found:
                     # Fall back to the top-k tickers by recent EDGAR activity
@@ -239,11 +239,11 @@ class PriceContextRetriever(BaseRetriever):
     ) -> List[Document]:
         try:
             with duckdb.connect(DB_PATH, read_only=True) as conn:
-                all_tickers = conn.execute(
-                    "SELECT DISTINCT ticker FROM polygon_bars"
-                ).fetchall()
                 query_upper = query.upper()
-                found = [r[0] for r in all_tickers if r[0] in query_upper] or None
+                found = [r[0] for r in conn.execute(
+                    "SELECT DISTINCT ticker FROM polygon_bars WHERE INSTR(?, ticker) > 0",
+                    [query_upper]
+                ).fetchall()] or None
 
                 if found:
                     ph  = ", ".join("?" * len(found))

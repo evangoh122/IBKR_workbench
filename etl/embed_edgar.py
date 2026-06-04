@@ -4,12 +4,10 @@ Downloads the most recent 10-K for each ticker from SEC EDGAR using sec-edgar-do
 extracts text using BeautifulSoup, splits into chunks via LangChain,
 embeds with SentenceTransformers, and stores into DuckDB `edgar_embeddings`.
 """
-import os
 import shutil
-import time
 from pathlib import Path
 from bs4 import BeautifulSoup
-from typing import List, Dict, Any
+from typing import List
 from datetime import datetime, timezone
 
 from loguru import logger

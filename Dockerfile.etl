@@ -14,10 +14,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source code
 COPY . .
 
-RUN mkdir -p data logs && \
-    useradd --create-home appuser && \
-    chown -R appuser:appuser /app
-
-USER appuser
+RUN mkdir -p data logs
 
 CMD ["python", "main.py"]

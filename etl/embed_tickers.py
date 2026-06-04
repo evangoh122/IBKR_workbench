@@ -4,7 +4,6 @@ Generates text embeddings for ticker descriptions and stores them in DuckDB.
 
 Current source: polygon_tickers.description
 """
-from typing import List
 
 from loguru import logger
 

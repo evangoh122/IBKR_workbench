@@ -6,7 +6,6 @@ Two-phase options ETL:
 """
 import os
 import threading
-from datetime import datetime, timezone
 from typing import List
 
 from loguru import logger

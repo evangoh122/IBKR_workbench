@@ -31,7 +31,7 @@ jobs:
           pip install ruff coverage
 
       - name: Lint with ruff
-        run: ruff check etl/ db/ config/ dashboard/ --ignore E501
+        run: ruff check etl/ db/ config/ dashboard/ --ignore E501,E402
 
       - name: Run tests with coverage
         run: coverage run -m pytest

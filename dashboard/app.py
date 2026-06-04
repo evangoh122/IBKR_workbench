@@ -48,15 +48,16 @@ st.set_page_config(
 )
 
 # ── Theme colours ─────────────────────────────────────────────────────────────
-CLR_GREEN  = "#00c96f"
-CLR_RED    = "#ff4b4b"
-CLR_BLUE   = "#4b9dff"
-CLR_GOLD   = "#f5c842"
-CLR_BG     = "#0e1117"
-CLR_CARD   = "#1c2130"
+CLR_GREEN = "#00c96f"
+CLR_RED = "#ff4b4b"
+CLR_BLUE = "#4b9dff"
+CLR_GOLD = "#f5c842"
+CLR_BG = "#0e1117"
+CLR_CARD = "#1c2130"
 CLR_BORDER = "#2a3246"
 
-st.markdown(f"""
+st.markdown(
+    f"""
 <style>
   .metric-card {{
     background: {CLR_CARD};
@@ -72,7 +73,9 @@ st.markdown(f"""
   .down {{ color: {CLR_RED}; }}
   section[data-testid="stSidebar"] {{ background: #131926; }}
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -104,16 +107,19 @@ def no_db():
 with st.sidebar:
     st.markdown("## ⚡ IBKR Workbench")
     st.markdown("---")
-    page = st.radio("Navigate", [
-        "💬 Chat",
-        "📊 Stock Quotes",
-        "📉 Price History",
-        "📦 Polygon OHLCV",
-        "🔗 Options Chain",
-        "💸 Cost Calculator",
-        "🩺 ETL Health",
-        "ℹ️ About",
-    ])
+    page = st.radio(
+        "Navigate",
+        [
+            "💬 Chat",
+            "📊 Stock Quotes",
+            "📉 Price History",
+            "📦 Polygon OHLCV",
+            "🔗 Options Chain",
+            "💸 Cost Calculator",
+            "🩺 ETL Health",
+            "ℹ️ About",
+        ],
+    )
     st.markdown("---")
     st.caption(f"DB: `{DB_PATH}`")
     if st.button("🔄 Refresh data"):
@@ -126,20 +132,31 @@ with st.sidebar:
 # ══════════════════════════════════════════════════════════════════════════════
 if page == "💬 Chat":
     st.title("💬 Chat with your data")
-    
-    chat_mode = st.radio("Chat Mode", ["Database (SQL)", "Knowledge Base (RAG)"], horizontal=True, 
-                         help="Database mode generates SQL to query numerical data. RAG mode searches SEC filings and ticker descriptions.")
-    
+
+    chat_mode = st.radio(
+        "Chat Mode",
+        ["Database (SQL)", "Knowledge Base (RAG)"],
+        horizontal=True,
+        help="Database mode generates SQL to query numerical data. RAG mode searches SEC filings and ticker descriptions.",
+    )
+
     provider = os.getenv("CHAT_PROVIDER", "deepseek").lower()
-    st.caption(f"Ask anything about your stocks, options, EDGAR financials, or Polygon history. Powered by {provider.title()}.")
+    st.caption(
+        f"Ask anything about your stocks, options, EDGAR financials, or Polygon history. Powered by {provider.title()}."
+    )
 
     if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []   # list of {role, content}
+        st.session_state.chat_history = []  # list of {role, content}
     if "chat_results" not in st.session_state:
-        st.session_state.chat_results = []   # list of result dicts (parallel to user turns)
+        st.session_state.chat_results = []  # list of result dicts (parallel to user turns)
 
     # Check API key
-    if not os.getenv("DEEPSEEK_API_KEY") and not os.getenv("OPENAI_API_KEY") and not os.getenv("ANTHROPIC_API_KEY") and os.getenv("CHAT_PROVIDER", "ollama") != "ollama":
+    if (
+        not os.getenv("DEEPSEEK_API_KEY")
+        and not os.getenv("OPENAI_API_KEY")
+        and not os.getenv("ANTHROPIC_API_KEY")
+        and os.getenv("CHAT_PROVIDER", "ollama") != "ollama"
+    ):
         st.warning("⚠️  API key not set in .env for your chosen provider.")
         st.stop()
 
@@ -151,16 +168,26 @@ if page == "💬 Chat":
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             # Show table result below assistant messages that have data
-            if msg["role"] == "assistant" and i // 2 < len(st.session_state.chat_results):
+            if msg["role"] == "assistant" and i // 2 < len(
+                st.session_state.chat_results
+            ):
                 result = st.session_state.chat_results[i // 2]
-                if result and result.get("type") == "table" and result.get("data") is not None:
+                if (
+                    result
+                    and result.get("type") == "table"
+                    and result.get("data") is not None
+                ):
                     with st.expander(f"📊 Query results ({len(result['data'])} rows)"):
                         if result.get("sql"):
                             st.code(result["sql"], language="sql")
-                        st.dataframe(result["data"], use_container_width=True, hide_index=True)
+                        st.dataframe(
+                            result["data"], use_container_width=True, hide_index=True
+                        )
 
     # ── Input ──────────────────────────────────────────────────────────────
-    if prompt := st.chat_input("Ask about your data… e.g. 'Show AAPL OHLCV for last 30 days'"):
+    if prompt := st.chat_input(
+        "Ask about your data… e.g. 'Show AAPL OHLCV for last 30 days'"
+    ):
         # Add user message
         st.session_state.chat_history.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
@@ -177,7 +204,12 @@ if page == "💬 Chat":
                     answer = result["answer"]
                 else:
                     answer = ask_rag(prompt)
-                    result = {"type": "text", "sql": None, "data": None, "answer": answer}
+                    result = {
+                        "type": "text",
+                        "sql": None,
+                        "data": None,
+                        "answer": answer,
+                    }
 
             st.markdown(answer)
 
@@ -185,7 +217,9 @@ if page == "💬 Chat":
                 with st.expander(f"📊 Query results ({len(result['data'])} rows)"):
                     if result.get("sql"):
                         st.code(result["sql"], language="sql")
-                    st.dataframe(result["data"], use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        result["data"], use_container_width=True, hide_index=True
+                    )
             elif result.get("type") == "error":
                 if result.get("sql"):
                     st.code(result["sql"], language="sql")
@@ -207,7 +241,9 @@ if page == "💬 Chat":
         for col, ex in zip(cols, examples):
             with col:
                 if st.button(ex, use_container_width=True):
-                    st.session_state.chat_history.append({"role": "user", "content": ex})
+                    st.session_state.chat_history.append(
+                        {"role": "user", "content": ex}
+                    )
                     st.rerun()
 
     if st.button("🗑️ Clear chat", key="clear_chat"):
@@ -243,62 +279,111 @@ elif page == "📊 Stock Quotes":
     cols = st.columns(min(len(latest), 5))
     for i, row in latest.iterrows():
         spread = (row.get("ask", 0) or 0) - (row.get("bid", 0) or 0)
-        chg    = ((row.get("last", 0) or 0) - (row.get("close", 0) or 1)) / (row.get("close", 1) or 1) * 100
-        cls    = "up" if chg >= 0 else "down"
-        arrow  = "▲" if chg >= 0 else "▼"
+        chg = (
+            ((row.get("last", 0) or 0) - (row.get("close", 0) or 1))
+            / (row.get("close", 1) or 1)
+            * 100
+        )
+        cls = "up" if chg >= 0 else "down"
+        arrow = "▲" if chg >= 0 else "▼"
         with cols[i % 5]:
-            st.markdown(f"""
+            st.markdown(
+                f"""
             <div class="metric-card">
-              <div class="metric-label">{row['ticker']}</div>
-              <div class="metric-value">${row.get('last', 0) or 0:.2f}</div>
+              <div class="metric-label">{row["ticker"]}</div>
+              <div class="metric-value">${row.get("last", 0) or 0:.2f}</div>
               <div class="metric-delta {cls}">{arrow} {abs(chg):.2f}% vs close</div>
               <div style="color:#8899aa;font-size:11px;margin-top:4px">
-                Spread: ${spread:.3f} &nbsp;|&nbsp; Vol: {int(row.get('volume',0) or 0):,}
+                Spread: ${spread:.3f} &nbsp;|&nbsp; Vol: {int(row.get("volume", 0) or 0):,}
               </div>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+                unsafe_allow_html=True,
+            )
 
     st.markdown("---")
 
     # ── Spread comparison bar chart ────────────────────────────────────────
     st.subheader("Bid-Ask Spread Comparison")
-    latest["spread"]     = (latest["ask"] - latest["bid"]).fillna(0)
-    latest["spread_bps"] = (latest["spread"] / latest["last"].replace(0, float("nan")) * 10000).fillna(0)
+    latest["spread"] = (latest["ask"] - latest["bid"]).fillna(0)
+    latest["spread_bps"] = (
+        latest["spread"] / latest["last"].replace(0, float("nan")) * 10000
+    ).fillna(0)
 
     fig_spread = go.Figure()
-    fig_spread.add_trace(go.Bar(
-        x=latest["ticker"],
-        y=latest["spread_bps"],
-        marker_color=CLR_BLUE,
-        text=latest["spread_bps"].round(1).astype(str) + " bps",
-        textposition="outside",
-        name="Spread (bps)",
-    ))
+    fig_spread.add_trace(
+        go.Bar(
+            x=latest["ticker"],
+            y=latest["spread_bps"],
+            marker_color=CLR_BLUE,
+            text=latest["spread_bps"].round(1).astype(str) + " bps",
+            textposition="outside",
+            name="Spread (bps)",
+        )
+    )
     fig_spread.update_layout(
-        template="plotly_dark", plot_bgcolor=CLR_BG, paper_bgcolor=CLR_BG,
-        yaxis_title="Basis Points", height=350, margin=dict(t=20, b=20),
+        template="plotly_dark",
+        plot_bgcolor=CLR_BG,
+        paper_bgcolor=CLR_BG,
+        yaxis_title="Basis Points",
+        height=350,
+        margin=dict(t=20, b=20),
     )
     st.plotly_chart(fig_spread, use_container_width=True)
 
     # ── Volume bar chart ───────────────────────────────────────────────────
     st.subheader("Volume")
-    fig_vol = go.Figure(go.Bar(
-        x=latest["ticker"],
-        y=latest["volume"].fillna(0),
-        marker_color=CLR_GOLD,
-        text=(latest["volume"].fillna(0) / 1e6).round(1).astype(str) + "M",
-        textposition="outside",
-    ))
+    fig_vol = go.Figure(
+        go.Bar(
+            x=latest["ticker"],
+            y=latest["volume"].fillna(0),
+            marker_color=CLR_GOLD,
+            text=(latest["volume"].fillna(0) / 1e6).round(1).astype(str) + "M",
+            textposition="outside",
+        )
+    )
     fig_vol.update_layout(
-        template="plotly_dark", plot_bgcolor=CLR_BG, paper_bgcolor=CLR_BG,
-        yaxis_title="Shares", height=350, margin=dict(t=20, b=20),
+        template="plotly_dark",
+        plot_bgcolor=CLR_BG,
+        paper_bgcolor=CLR_BG,
+        yaxis_title="Shares",
+        height=350,
+        margin=dict(t=20, b=20),
     )
     st.plotly_chart(fig_vol, use_container_width=True)
 
     # ── Full table ─────────────────────────────────────────────────────────
     st.subheader("Full Quote Table")
-    display = latest[["ticker","ts","bid","ask","last","close","open","high","low","volume","spread","spread_bps"]].copy()
-    display.columns = ["Ticker","Timestamp","Bid","Ask","Last","Close","Open","High","Low","Volume","Spread $","Spread bps"]
+    display = latest[
+        [
+            "ticker",
+            "ts",
+            "bid",
+            "ask",
+            "last",
+            "close",
+            "open",
+            "high",
+            "low",
+            "volume",
+            "spread",
+            "spread_bps",
+        ]
+    ].copy()
+    display.columns = [
+        "Ticker",
+        "Timestamp",
+        "Bid",
+        "Ask",
+        "Last",
+        "Close",
+        "Open",
+        "High",
+        "Low",
+        "Volume",
+        "Spread $",
+        "Spread bps",
+    ]
     st.dataframe(display, use_container_width=True, hide_index=True)
 
 
@@ -311,7 +396,9 @@ elif page == "📉 Price History":
     if get_conn() is None:
         no_db()
 
-    tickers = q("SELECT DISTINCT ticker FROM stock_quotes ORDER BY ticker")["ticker"].tolist()
+    tickers = q("SELECT DISTINCT ticker FROM stock_quotes ORDER BY ticker")[
+        "ticker"
+    ].tolist()
     if not tickers:
         st.info("No data yet.")
         st.stop()
@@ -320,16 +407,23 @@ elif page == "📉 Price History":
     with c1:
         ticker = st.selectbox("Ticker", tickers)
     with c2:
-        hours = st.selectbox("Window", [1, 4, 8, 24, 48, 168], index=3,
-                             format_func=lambda h: f"{h}h" if h < 24 else f"{h//24}d")
+        hours = st.selectbox(
+            "Window",
+            [1, 4, 8, 24, 48, 168],
+            index=3,
+            format_func=lambda h: f"{h}h" if h < 24 else f"{h // 24}d",
+        )
     with c3:
         chart_type = st.selectbox("Chart type", ["Candlestick", "Line (last)", "OHLC"])
 
     since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    hist  = q("""
+    hist = q(
+        """
         SELECT ts, open, high, low, last AS close, bid, ask, volume
         FROM stock_quotes WHERE ticker=? AND ts>=? ORDER BY ts
-    """, (ticker, since))
+    """,
+        (ticker, since),
+    )
 
     if hist.empty:
         st.info(f"No history for {ticker} in the last {hours}h.")
@@ -338,51 +432,92 @@ elif page == "📉 Price History":
     hist["ts"] = pd.to_datetime(hist["ts"])
 
     # ── Price chart ────────────────────────────────────────────────────────
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                        row_heights=[0.7, 0.3], vertical_spacing=0.03)
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.03
+    )
 
     if chart_type == "Candlestick":
-        fig.add_trace(go.Candlestick(
-            x=hist["ts"], open=hist["open"], high=hist["high"],
-            low=hist["low"], close=hist["close"],
-            increasing_line_color=CLR_GREEN, decreasing_line_color=CLR_RED,
-            name=ticker,
-        ), row=1, col=1)
+        fig.add_trace(
+            go.Candlestick(
+                x=hist["ts"],
+                open=hist["open"],
+                high=hist["high"],
+                low=hist["low"],
+                close=hist["close"],
+                increasing_line_color=CLR_GREEN,
+                decreasing_line_color=CLR_RED,
+                name=ticker,
+            ),
+            row=1,
+            col=1,
+        )
     elif chart_type == "OHLC":
-        fig.add_trace(go.Ohlc(
-            x=hist["ts"], open=hist["open"], high=hist["high"],
-            low=hist["low"], close=hist["close"],
-            increasing_line_color=CLR_GREEN, decreasing_line_color=CLR_RED,
-        ), row=1, col=1)
+        fig.add_trace(
+            go.Ohlc(
+                x=hist["ts"],
+                open=hist["open"],
+                high=hist["high"],
+                low=hist["low"],
+                close=hist["close"],
+                increasing_line_color=CLR_GREEN,
+                decreasing_line_color=CLR_RED,
+            ),
+            row=1,
+            col=1,
+        )
     else:
-        fig.add_trace(go.Scatter(
-            x=hist["ts"], y=hist["close"],
-            line=dict(color=CLR_BLUE, width=2), name="Last",
-        ), row=1, col=1)
+        fig.add_trace(
+            go.Scatter(
+                x=hist["ts"],
+                y=hist["close"],
+                line=dict(color=CLR_BLUE, width=2),
+                name="Last",
+            ),
+            row=1,
+            col=1,
+        )
         # Bid/ask band
-        fig.add_trace(go.Scatter(
-            x=pd.concat([hist["ts"], hist["ts"].iloc[::-1]]),
-            y=pd.concat([hist["ask"], hist["bid"].iloc[::-1]]),
-            fill="toself", fillcolor="rgba(75,157,255,0.12)",
-            line=dict(width=0), name="Bid-Ask band",
-        ), row=1, col=1)
+        fig.add_trace(
+            go.Scatter(
+                x=pd.concat([hist["ts"], hist["ts"].iloc[::-1]]),
+                y=pd.concat([hist["ask"], hist["bid"].iloc[::-1]]),
+                fill="toself",
+                fillcolor="rgba(75,157,255,0.12)",
+                line=dict(width=0),
+                name="Bid-Ask band",
+            ),
+            row=1,
+            col=1,
+        )
 
     # Volume bars
-    colors = [CLR_GREEN if r["close"] >= (r["open"] or r["close"]) else CLR_RED
-              for _, r in hist.iterrows()]
-    fig.add_trace(go.Bar(
-        x=hist["ts"], y=hist["volume"].fillna(0),
-        marker_color=colors, name="Volume", opacity=0.7,
-    ), row=2, col=1)
+    colors = [
+        CLR_GREEN if r["close"] >= (r["open"] or r["close"]) else CLR_RED
+        for _, r in hist.iterrows()
+    ]
+    fig.add_trace(
+        go.Bar(
+            x=hist["ts"],
+            y=hist["volume"].fillna(0),
+            marker_color=colors,
+            name="Volume",
+            opacity=0.7,
+        ),
+        row=2,
+        col=1,
+    )
 
     fig.update_layout(
-        template="plotly_dark", plot_bgcolor=CLR_BG, paper_bgcolor=CLR_BG,
-        height=600, margin=dict(t=20, b=20),
+        template="plotly_dark",
+        plot_bgcolor=CLR_BG,
+        paper_bgcolor=CLR_BG,
+        height=600,
+        margin=dict(t=20, b=20),
         xaxis_rangeslider_visible=False,
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
     )
     fig.update_yaxes(title_text="Price ($)", row=1, col=1)
-    fig.update_yaxes(title_text="Volume",    row=2, col=1)
+    fig.update_yaxes(title_text="Volume", row=2, col=1)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -395,7 +530,9 @@ elif page == "📦 Polygon OHLCV":
     if get_conn() is None:
         no_db()
 
-    tickers = q("SELECT DISTINCT ticker FROM polygon_bars ORDER BY ticker")["ticker"].tolist()
+    tickers = q("SELECT DISTINCT ticker FROM polygon_bars ORDER BY ticker")[
+        "ticker"
+    ].tolist()
     if not tickers:
         st.info("No polygon bars yet. Run `python main.py --job polygon-bars` first.")
         st.stop()
@@ -405,17 +542,24 @@ elif page == "📦 Polygon OHLCV":
         ticker = st.selectbox("Ticker", tickers)
     with c2:
         periods = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365, "2Y": 730}
-        period  = st.selectbox("Period", list(periods.keys()), index=3)
+        period = st.selectbox("Period", list(periods.keys()), index=3)
     with c3:
         chart_type = st.selectbox("Chart", ["Candlestick", "OHLC", "Line"])
 
-    since = (datetime.now(timezone.utc) - timedelta(days=periods[period])).date().isoformat()
-    bars  = q("""
+    since = (
+        (datetime.now(timezone.utc) - timedelta(days=periods[period]))
+        .date()
+        .isoformat()
+    )
+    bars = q(
+        """
         SELECT ts, open, high, low, close, volume, vwap
         FROM polygon_bars
         WHERE ticker = ? AND ts >= ? AND timespan = 'day'
         ORDER BY ts
-    """, (ticker, since))
+    """,
+        (ticker, since),
+    )
 
     if bars.empty:
         st.info(f"No data for {ticker}. Try running the bars ETL first.")
@@ -424,63 +568,108 @@ elif page == "📦 Polygon OHLCV":
     bars["ts"] = pd.to_datetime(bars["ts"])
 
     # ── Price + Volume chart ───────────────────────────────────────────────
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                        row_heights=[0.7, 0.3], vertical_spacing=0.03)
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.03
+    )
 
     if chart_type == "Candlestick":
-        fig.add_trace(go.Candlestick(
-            x=bars["ts"], open=bars["open"], high=bars["high"],
-            low=bars["low"], close=bars["close"],
-            increasing_line_color=CLR_GREEN, decreasing_line_color=CLR_RED,
-            name=ticker,
-        ), row=1, col=1)
+        fig.add_trace(
+            go.Candlestick(
+                x=bars["ts"],
+                open=bars["open"],
+                high=bars["high"],
+                low=bars["low"],
+                close=bars["close"],
+                increasing_line_color=CLR_GREEN,
+                decreasing_line_color=CLR_RED,
+                name=ticker,
+            ),
+            row=1,
+            col=1,
+        )
     elif chart_type == "OHLC":
-        fig.add_trace(go.Ohlc(
-            x=bars["ts"], open=bars["open"], high=bars["high"],
-            low=bars["low"], close=bars["close"],
-            increasing_line_color=CLR_GREEN, decreasing_line_color=CLR_RED,
-        ), row=1, col=1)
+        fig.add_trace(
+            go.Ohlc(
+                x=bars["ts"],
+                open=bars["open"],
+                high=bars["high"],
+                low=bars["low"],
+                close=bars["close"],
+                increasing_line_color=CLR_GREEN,
+                decreasing_line_color=CLR_RED,
+            ),
+            row=1,
+            col=1,
+        )
     else:
-        fig.add_trace(go.Scatter(
-            x=bars["ts"], y=bars["close"],
-            line=dict(color=CLR_BLUE, width=1.5), name="Close",
-        ), row=1, col=1)
+        fig.add_trace(
+            go.Scatter(
+                x=bars["ts"],
+                y=bars["close"],
+                line=dict(color=CLR_BLUE, width=1.5),
+                name="Close",
+            ),
+            row=1,
+            col=1,
+        )
         if bars["vwap"].notna().any():
-            fig.add_trace(go.Scatter(
-                x=bars["ts"], y=bars["vwap"],
-                line=dict(color=CLR_GOLD, width=1, dash="dot"), name="VWAP",
-            ), row=1, col=1)
+            fig.add_trace(
+                go.Scatter(
+                    x=bars["ts"],
+                    y=bars["vwap"],
+                    line=dict(color=CLR_GOLD, width=1, dash="dot"),
+                    name="VWAP",
+                ),
+                row=1,
+                col=1,
+            )
 
-    colors = [CLR_GREEN if c >= o else CLR_RED
-              for c, o in zip(bars["close"].fillna(0), bars["open"].fillna(0))]
-    fig.add_trace(go.Bar(
-        x=bars["ts"], y=bars["volume"].fillna(0),
-        marker_color=colors, name="Volume", opacity=0.6,
-    ), row=2, col=1)
+    colors = [
+        CLR_GREEN if c >= o else CLR_RED
+        for c, o in zip(bars["close"].fillna(0), bars["open"].fillna(0))
+    ]
+    fig.add_trace(
+        go.Bar(
+            x=bars["ts"],
+            y=bars["volume"].fillna(0),
+            marker_color=colors,
+            name="Volume",
+            opacity=0.6,
+        ),
+        row=2,
+        col=1,
+    )
 
     fig.update_layout(
-        template="plotly_dark", plot_bgcolor=CLR_BG, paper_bgcolor=CLR_BG,
-        height=620, margin=dict(t=20, b=20),
+        template="plotly_dark",
+        plot_bgcolor=CLR_BG,
+        paper_bgcolor=CLR_BG,
+        height=620,
+        margin=dict(t=20, b=20),
         xaxis_rangeslider_visible=False,
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
     )
     fig.update_yaxes(title_text="Price ($)", row=1, col=1)
-    fig.update_yaxes(title_text="Volume",    row=2, col=1)
+    fig.update_yaxes(title_text="Volume", row=2, col=1)
     st.plotly_chart(fig, use_container_width=True)
 
     # ── Stats ──────────────────────────────────────────────────────────────
     st.markdown("---")
     s1, s2, s3, s4, s5 = st.columns(5)
-    s1.metric("Bars",        f"{len(bars):,}")
-    s2.metric("High",        f"${bars['high'].max():.2f}")
-    s3.metric("Low",         f"${bars['low'].min():.2f}")
-    s4.metric("Avg Volume",  f"{bars['volume'].mean()/1e6:.1f}M")
+    s1.metric("Bars", f"{len(bars):,}")
+    s2.metric("High", f"${bars['high'].max():.2f}")
+    s3.metric("Low", f"${bars['low'].min():.2f}")
+    s4.metric("Avg Volume", f"{bars['volume'].mean() / 1e6:.1f}M")
     ret = (bars["close"].iloc[-1] / bars["close"].iloc[0] - 1) * 100
     s5.metric("Period Return", f"{ret:+.1f}%")
 
     # ── Raw data table ─────────────────────────────────────────────────────
     with st.expander("Raw data"):
-        st.dataframe(bars.sort_values("ts", ascending=False), use_container_width=True, hide_index=True)
+        st.dataframe(
+            bars.sort_values("ts", ascending=False),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -492,20 +681,25 @@ elif page == "🔗 Options Chain":
     if get_conn() is None:
         no_db()
 
-    tickers = q("SELECT DISTINCT ticker FROM option_quotes ORDER BY ticker")["ticker"].tolist()
+    tickers = q("SELECT DISTINCT ticker FROM option_quotes ORDER BY ticker")[
+        "ticker"
+    ].tolist()
     if not tickers:
         st.info("No options data yet. Run `python main.py --refresh-chain` first.")
         st.stop()
 
     c1, c2 = st.columns(2)
     with c1:
-        ticker  = st.selectbox("Underlying", tickers)
+        ticker = st.selectbox("Underlying", tickers)
     with c2:
-        expiries = q("SELECT DISTINCT expiry FROM option_quotes WHERE ticker=? ORDER BY expiry",
-                     (ticker,))["expiry"].tolist()
-        expiry   = st.selectbox("Expiry", expiries)
+        expiries = q(
+            "SELECT DISTINCT expiry FROM option_quotes WHERE ticker=? ORDER BY expiry",
+            (ticker,),
+        )["expiry"].tolist()
+        expiry = st.selectbox("Expiry", expiries)
 
-    opts = q("""
+    opts = q(
+        """
         SELECT oq.*
         FROM option_quotes oq
         INNER JOIN (
@@ -515,16 +709,20 @@ elif page == "🔗 Options Chain":
            AND oq.strike=l.strike AND oq.right=l.right AND oq.ts=l.max_ts
         WHERE oq.ticker=? AND oq.expiry=?
         ORDER BY oq.strike, oq.right
-    """, (ticker, expiry))
+    """,
+        (ticker, expiry),
+    )
 
     if opts.empty:
         st.info("No data for this expiry.")
         st.stop()
 
     calls = opts[opts["right"] == "C"].set_index("strike")
-    puts  = opts[opts["right"] == "P"].set_index("strike")
+    puts = opts[opts["right"] == "P"].set_index("strike")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 Chain Table", "📈 IV Smile", "🔥 Greeks Heatmap", "📊 OI & Volume"])
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["📋 Chain Table", "📈 IV Smile", "🔥 Greeks Heatmap", "📊 OI & Volume"]
+    )
 
     # ── Tab 1: Chain table ─────────────────────────────────────────────────
     with tab1:
@@ -532,32 +730,49 @@ elif page == "🔗 Options Chain":
         rows = []
         for s in strikes:
             c = calls.loc[s] if s in calls.index else {}
-            p = puts.loc[s]  if s in puts.index  else {}
-            rows.append({
-                "Strike":     s,
-                "C Bid":      c.get("bid"),   "C Ask":   c.get("ask"),
-                "C IV":       c.get("implied_vol"), "C Delta": c.get("delta"),
-                "C OI":       c.get("open_interest"), "C Vol": c.get("volume"),
-                "P Bid":      p.get("bid"),   "P Ask":   p.get("ask"),
-                "P IV":       p.get("implied_vol"), "P Delta": p.get("delta"),
-                "P OI":       p.get("open_interest"), "P Vol": p.get("volume"),
-            })
+            p = puts.loc[s] if s in puts.index else {}
+            rows.append(
+                {
+                    "Strike": s,
+                    "C Bid": c.get("bid"),
+                    "C Ask": c.get("ask"),
+                    "C IV": c.get("implied_vol"),
+                    "C Delta": c.get("delta"),
+                    "C OI": c.get("open_interest"),
+                    "C Vol": c.get("volume"),
+                    "P Bid": p.get("bid"),
+                    "P Ask": p.get("ask"),
+                    "P IV": p.get("implied_vol"),
+                    "P Delta": p.get("delta"),
+                    "P OI": p.get("open_interest"),
+                    "P Vol": p.get("volume"),
+                }
+            )
         chain_df = pd.DataFrame(rows)
 
         # Highlight ATM row
-        last_px = q("SELECT last FROM stock_quotes WHERE ticker=? ORDER BY ts DESC LIMIT 1",
-                    (ticker,))
+        last_px = q(
+            "SELECT last FROM stock_quotes WHERE ticker=? ORDER BY ts DESC LIMIT 1",
+            (ticker,),
+        )
         if not last_px.empty:
             atm = float(last_px.iloc[0]["last"] or 0)
             st.caption(f"Underlying last: **${atm:.2f}**")
 
         def style_chain(df):
-            return df.style.format({
-                "C Bid":   "${:.2f}", "C Ask":   "${:.2f}",
-                "P Bid":   "${:.2f}", "P Ask":   "${:.2f}",
-                "C IV":    "{:.1%}",  "P IV":    "{:.1%}",
-                "C Delta": "{:.3f}",  "P Delta": "{:.3f}",
-            }, na_rep="—")
+            return df.style.format(
+                {
+                    "C Bid": "${:.2f}",
+                    "C Ask": "${:.2f}",
+                    "P Bid": "${:.2f}",
+                    "P Ask": "${:.2f}",
+                    "C IV": "{:.1%}",
+                    "P IV": "{:.1%}",
+                    "C Delta": "{:.3f}",
+                    "P Delta": "{:.3f}",
+                },
+                na_rep="—",
+            )
 
         st.dataframe(style_chain(chain_df), use_container_width=True, hide_index=True)
 
@@ -565,21 +780,34 @@ elif page == "🔗 Options Chain":
     with tab2:
         fig_iv = go.Figure()
         if not calls.empty and "implied_vol" in calls.columns:
-            fig_iv.add_trace(go.Scatter(
-                x=calls.index, y=calls["implied_vol"],
-                mode="lines+markers", name="Calls IV",
-                line=dict(color=CLR_GREEN, width=2),
-            ))
+            fig_iv.add_trace(
+                go.Scatter(
+                    x=calls.index,
+                    y=calls["implied_vol"],
+                    mode="lines+markers",
+                    name="Calls IV",
+                    line=dict(color=CLR_GREEN, width=2),
+                )
+            )
         if not puts.empty and "implied_vol" in puts.columns:
-            fig_iv.add_trace(go.Scatter(
-                x=puts.index, y=puts["implied_vol"],
-                mode="lines+markers", name="Puts IV",
-                line=dict(color=CLR_RED, width=2),
-            ))
+            fig_iv.add_trace(
+                go.Scatter(
+                    x=puts.index,
+                    y=puts["implied_vol"],
+                    mode="lines+markers",
+                    name="Puts IV",
+                    line=dict(color=CLR_RED, width=2),
+                )
+            )
         fig_iv.update_layout(
-            template="plotly_dark", plot_bgcolor=CLR_BG, paper_bgcolor=CLR_BG,
-            xaxis_title="Strike", yaxis_title="Implied Volatility",
-            yaxis_tickformat=".1%", height=420, margin=dict(t=20, b=20),
+            template="plotly_dark",
+            plot_bgcolor=CLR_BG,
+            paper_bgcolor=CLR_BG,
+            xaxis_title="Strike",
+            yaxis_title="Implied Volatility",
+            yaxis_tickformat=".1%",
+            height=420,
+            margin=dict(t=20, b=20),
         )
         st.plotly_chart(fig_iv, use_container_width=True)
 
@@ -590,23 +818,28 @@ elif page == "🔗 Options Chain":
 
         for col, df, label, color in [
             (c1, calls, "Calls", "Greens"),
-            (c2, puts,  "Puts",  "Reds"),
+            (c2, puts, "Puts", "Reds"),
         ]:
             with col:
                 st.markdown(f"**{label}**")
                 if greek in df.columns and not df[greek].isna().all():
-                    fig_hm = go.Figure(go.Bar(
-                        x=df.index.tolist(),
-                        y=df[greek].tolist(),
-                        marker_color=df[greek],
-                        marker_colorscale=color,
-                        name=f"{label} {greek}",
-                    ))
+                    fig_hm = go.Figure(
+                        go.Bar(
+                            x=df.index.tolist(),
+                            y=df[greek].tolist(),
+                            marker_color=df[greek],
+                            marker_colorscale=color,
+                            name=f"{label} {greek}",
+                        )
+                    )
                     fig_hm.update_layout(
                         template="plotly_dark",
-                        plot_bgcolor=CLR_BG, paper_bgcolor=CLR_BG,
-                        height=350, margin=dict(t=10, b=10),
-                        xaxis_title="Strike", yaxis_title=greek.capitalize(),
+                        plot_bgcolor=CLR_BG,
+                        paper_bgcolor=CLR_BG,
+                        height=350,
+                        margin=dict(t=10, b=10),
+                        xaxis_title="Strike",
+                        yaxis_title=greek.capitalize(),
                     )
                     st.plotly_chart(fig_hm, use_container_width=True)
                 else:
@@ -614,34 +847,76 @@ elif page == "🔗 Options Chain":
 
     # ── Tab 4: OI & Volume ─────────────────────────────────────────────────
     with tab4:
-        fig_oi = make_subplots(rows=1, cols=2,
-                               subplot_titles=["Open Interest by Strike", "Volume by Strike"])
+        fig_oi = make_subplots(
+            rows=1,
+            cols=2,
+            subplot_titles=["Open Interest by Strike", "Volume by Strike"],
+        )
         all_strikes = sorted(set(calls.index) | set(puts.index))
 
-        fig_oi.add_trace(go.Bar(
-            x=all_strikes,
-            y=[calls.loc[s, "open_interest"] if s in calls.index else 0 for s in all_strikes],
-            name="Call OI", marker_color=CLR_GREEN, opacity=0.8,
-        ), row=1, col=1)
-        fig_oi.add_trace(go.Bar(
-            x=all_strikes,
-            y=[puts.loc[s, "open_interest"] if s in puts.index else 0 for s in all_strikes],
-            name="Put OI", marker_color=CLR_RED, opacity=0.8,
-        ), row=1, col=1)
-        fig_oi.add_trace(go.Bar(
-            x=all_strikes,
-            y=[calls.loc[s, "volume"] if s in calls.index else 0 for s in all_strikes],
-            name="Call Vol", marker_color=CLR_BLUE, opacity=0.8,
-        ), row=1, col=2)
-        fig_oi.add_trace(go.Bar(
-            x=all_strikes,
-            y=[puts.loc[s, "volume"] if s in puts.index else 0 for s in all_strikes],
-            name="Put Vol", marker_color=CLR_GOLD, opacity=0.8,
-        ), row=1, col=2)
+        fig_oi.add_trace(
+            go.Bar(
+                x=all_strikes,
+                y=[
+                    calls.loc[s, "open_interest"] if s in calls.index else 0
+                    for s in all_strikes
+                ],
+                name="Call OI",
+                marker_color=CLR_GREEN,
+                opacity=0.8,
+            ),
+            row=1,
+            col=1,
+        )
+        fig_oi.add_trace(
+            go.Bar(
+                x=all_strikes,
+                y=[
+                    puts.loc[s, "open_interest"] if s in puts.index else 0
+                    for s in all_strikes
+                ],
+                name="Put OI",
+                marker_color=CLR_RED,
+                opacity=0.8,
+            ),
+            row=1,
+            col=1,
+        )
+        fig_oi.add_trace(
+            go.Bar(
+                x=all_strikes,
+                y=[
+                    calls.loc[s, "volume"] if s in calls.index else 0
+                    for s in all_strikes
+                ],
+                name="Call Vol",
+                marker_color=CLR_BLUE,
+                opacity=0.8,
+            ),
+            row=1,
+            col=2,
+        )
+        fig_oi.add_trace(
+            go.Bar(
+                x=all_strikes,
+                y=[
+                    puts.loc[s, "volume"] if s in puts.index else 0 for s in all_strikes
+                ],
+                name="Put Vol",
+                marker_color=CLR_GOLD,
+                opacity=0.8,
+            ),
+            row=1,
+            col=2,
+        )
 
         fig_oi.update_layout(
-            template="plotly_dark", plot_bgcolor=CLR_BG, paper_bgcolor=CLR_BG,
-            height=400, barmode="group", margin=dict(t=40, b=20),
+            template="plotly_dark",
+            plot_bgcolor=CLR_BG,
+            paper_bgcolor=CLR_BG,
+            height=400,
+            barmode="group",
+            margin=dict(t=40, b=20),
         )
         st.plotly_chart(fig_oi, use_container_width=True)
 
@@ -651,20 +926,29 @@ elif page == "🔗 Options Chain":
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "💸 Cost Calculator":
     st.title("💸 Transaction Cost Calculator")
-    st.caption("Model round-trip slippage, commissions, and market impact for any trade.")
+    st.caption(
+        "Model round-trip slippage, commissions, and market impact for any trade."
+    )
 
     # ── Toggles ────────────────────────────────────────────────────────────
     st.subheader("Cost Components")
     tc1, tc2, tc3 = st.columns(3)
     with tc1:
-        use_spread = st.toggle("Bid-Ask Spread", value=True,
-                               help="Half-spread paid on entry + exit")
+        use_spread = st.toggle(
+            "Bid-Ask Spread", value=True, help="Half-spread paid on entry + exit"
+        )
     with tc2:
-        use_commission = st.toggle("Commission (IBKR)", value=True,
-                                   help="IBKR tiered commission + regulatory fees")
+        use_commission = st.toggle(
+            "Commission (IBKR)",
+            value=True,
+            help="IBKR tiered commission + regulatory fees",
+        )
     with tc3:
-        use_impact = st.toggle("Market Impact", value=True,
-                               help="Square-root impact model (Almgren-Chriss simplified)")
+        use_impact = st.toggle(
+            "Market Impact",
+            value=True,
+            help="Square-root impact model (Almgren-Chriss simplified)",
+        )
 
     toggles = SlippageToggles(
         spread=use_spread,
@@ -680,27 +964,38 @@ elif page == "💸 Cost Calculator":
 
     col1, col2 = st.columns(2)
     with col1:
-        ticker   = st.text_input("Ticker", value="AAPL")
-        price    = st.number_input("Mid price ($)", min_value=0.01, value=182.50, step=0.01)
-        bid      = st.number_input("Bid ($)", min_value=0.00, value=182.45, step=0.01)
-        ask      = st.number_input("Ask ($)", min_value=0.00, value=182.55, step=0.01)
+        ticker = st.text_input("Ticker", value="AAPL")
+        price = st.number_input(
+            "Mid price ($)", min_value=0.01, value=182.50, step=0.01
+        )
+        bid = st.number_input("Bid ($)", min_value=0.00, value=182.45, step=0.01)
+        ask = st.number_input("Ask ($)", min_value=0.00, value=182.55, step=0.01)
 
     with col2:
         if asset_type == "Stock":
             quantity = st.number_input("Shares", min_value=1, value=1000, step=100)
-            adv      = st.number_input("Avg Daily Volume (shares)", min_value=1,
-                                        value=50_000_000, step=1_000_000,
-                                        help="Used for market impact calculation")
-            monthly  = st.number_input("Monthly shares traded (IBKR tier)",
-                                        min_value=0, value=0, step=10_000,
-                                        help="Affects per-share commission rate")
-            mult     = 1.0
+            adv = st.number_input(
+                "Avg Daily Volume (shares)",
+                min_value=1,
+                value=50_000_000,
+                step=1_000_000,
+                help="Used for market impact calculation",
+            )
+            monthly = st.number_input(
+                "Monthly shares traded (IBKR tier)",
+                min_value=0,
+                value=0,
+                step=10_000,
+                help="Affects per-share commission rate",
+            )
+            mult = 1.0
         else:
             quantity = st.number_input("Contracts", min_value=1, value=10, step=1)
-            mult     = st.number_input("Multiplier", min_value=1, value=100, step=1)
-            adv      = st.number_input("Underlying ADV (shares)", min_value=1,
-                                        value=50_000_000, step=1_000_000)
-            monthly  = 0
+            mult = st.number_input("Multiplier", min_value=1, value=100, step=1)
+            adv = st.number_input(
+                "Underlying ADV (shares)", min_value=1, value=50_000_000, step=1_000_000
+            )
+            monthly = 0
 
     # ── Calculate ──────────────────────────────────────────────────────────
     cb = calculate_costs(
@@ -721,35 +1016,50 @@ elif page == "💸 Cost Calculator":
 
     r1, r2, r3, r4 = st.columns(4)
     r1.metric("Total Round-Trip Cost", f"${cb.total_cost:,.2f}")
-    r2.metric("Cost (bps)",            f"{cb.cost_bps:.1f} bps")
-    r3.metric("Notional Value",        f"${cb.notional:,.2f}")
-    r4.metric("Cost / Notional",       f"{cb.total_cost/cb.notional*100:.3f}%" if cb.notional else "—")
+    r2.metric("Cost (bps)", f"{cb.cost_bps:.1f} bps")
+    r3.metric("Notional Value", f"${cb.notional:,.2f}")
+    r4.metric(
+        "Cost / Notional",
+        f"{cb.total_cost / cb.notional * 100:.3f}%" if cb.notional else "—",
+    )
 
     # ── Waterfall breakdown ────────────────────────────────────────────────
     components = []
-    values     = []
+    values = []
     if use_spread:
-        components.append("Bid-Ask Spread"); values.append(cb.spread_cost)
+        components.append("Bid-Ask Spread")
+        values.append(cb.spread_cost)
     if use_commission:
-        components.append("Commission");     values.append(cb.commission_cost)
+        components.append("Commission")
+        values.append(cb.commission_cost)
     if use_impact:
-        components.append("Market Impact");  values.append(cb.market_impact_cost)
-    components.append("Total"); values.append(cb.total_cost)
+        components.append("Market Impact")
+        values.append(cb.market_impact_cost)
+    components.append("Total")
+    values.append(cb.total_cost)
 
     measure = ["relative"] * (len(components) - 1) + ["total"]
-    fig_wf = go.Figure(go.Waterfall(
-        name="Cost breakdown", measure=measure,
-        x=components, y=values,
-        connector=dict(line=dict(color="rgb(63,63,63)")),
-        increasing=dict(marker_color=CLR_RED),
-        totals=dict(marker_color=CLR_BLUE),
-        text=[f"${v:,.2f}" for v in values],
-        textposition="outside",
-    ))
+    fig_wf = go.Figure(
+        go.Waterfall(
+            name="Cost breakdown",
+            measure=measure,
+            x=components,
+            y=values,
+            connector=dict(line=dict(color="rgb(63,63,63)")),
+            increasing=dict(marker_color=CLR_RED),
+            totals=dict(marker_color=CLR_BLUE),
+            text=[f"${v:,.2f}" for v in values],
+            textposition="outside",
+        )
+    )
     fig_wf.update_layout(
-        template="plotly_dark", plot_bgcolor=CLR_BG, paper_bgcolor=CLR_BG,
+        template="plotly_dark",
+        plot_bgcolor=CLR_BG,
+        paper_bgcolor=CLR_BG,
         title="Cost Breakdown (Round-Trip $)",
-        yaxis_title="USD", height=380, margin=dict(t=50, b=20),
+        yaxis_title="USD",
+        height=380,
+        margin=dict(t=50, b=20),
     )
     st.plotly_chart(fig_wf, use_container_width=True)
 
@@ -765,44 +1075,73 @@ elif page == "💸 Cost Calculator":
     sens_rows = []
     for qty in qtys:
         c = calculate_costs(
-            ticker=ticker, asset_type=asset_type.lower(),
-            quantity=qty, price=price, bid=bid, ask=ask,
-            multiplier=float(mult), adv=adv, toggles=toggles,
+            ticker=ticker,
+            asset_type=asset_type.lower(),
+            quantity=qty,
+            price=price,
+            bid=bid,
+            ask=ask,
+            multiplier=float(mult),
+            adv=adv,
+            toggles=toggles,
             monthly_shares=monthly,
         )
-        sens_rows.append({
-            q_label:    qty,
-            "Spread":   c.spread_cost,
-            "Commission": c.commission_cost,
-            "Impact":   c.market_impact_cost,
-            "Total":    c.total_cost,
-            "bps":      c.cost_bps,
-        })
+        sens_rows.append(
+            {
+                q_label: qty,
+                "Spread": c.spread_cost,
+                "Commission": c.commission_cost,
+                "Impact": c.market_impact_cost,
+                "Total": c.total_cost,
+                "bps": c.cost_bps,
+            }
+        )
     sens_df = pd.DataFrame(sens_rows)
 
     fig_sens = go.Figure()
-    for col, color in [("Spread", CLR_GREEN), ("Commission", CLR_GOLD), ("Impact", CLR_RED)]:
+    for col, color in [
+        ("Spread", CLR_GREEN),
+        ("Commission", CLR_GOLD),
+        ("Impact", CLR_RED),
+    ]:
         if col in sens_df.columns and sens_df[col].sum() > 0:
-            fig_sens.add_trace(go.Scatter(
-                x=sens_df[q_label], y=sens_df[col],
-                stackgroup="one", name=col,
-                line=dict(color=color),
-                fillcolor=color.replace(")", ",0.4)").replace("rgb", "rgba") if "rgb" in color
-                           else color + "66",
-            ))
+            fig_sens.add_trace(
+                go.Scatter(
+                    x=sens_df[q_label],
+                    y=sens_df[col],
+                    stackgroup="one",
+                    name=col,
+                    line=dict(color=color),
+                    fillcolor=color.replace(")", ",0.4)").replace("rgb", "rgba")
+                    if "rgb" in color
+                    else color + "66",
+                )
+            )
     fig_sens.update_layout(
-        template="plotly_dark", plot_bgcolor=CLR_BG, paper_bgcolor=CLR_BG,
-        xaxis_title=q_label, yaxis_title="Cost ($)",
-        height=380, margin=dict(t=20, b=20),
+        template="plotly_dark",
+        plot_bgcolor=CLR_BG,
+        paper_bgcolor=CLR_BG,
+        xaxis_title=q_label,
+        yaxis_title="Cost ($)",
+        height=380,
+        margin=dict(t=20, b=20),
     )
     st.plotly_chart(fig_sens, use_container_width=True)
 
     # Raw table
     with st.expander("Raw sensitivity table"):
-        st.dataframe(sens_df.style.format({
-            "Spread": "${:,.2f}", "Commission": "${:,.2f}",
-            "Impact": "${:,.2f}", "Total": "${:,.2f}", "bps": "{:.1f}",
-        }), use_container_width=True)
+        st.dataframe(
+            sens_df.style.format(
+                {
+                    "Spread": "${:,.2f}",
+                    "Commission": "${:,.2f}",
+                    "Impact": "${:,.2f}",
+                    "Total": "${:,.2f}",
+                    "bps": "{:.1f}",
+                }
+            ),
+            use_container_width=True,
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -838,17 +1177,19 @@ elif page == "🩺 ETL Health":
         st.info("No ETL runs logged yet.")
     else:
         # Status summary
-        ok_count  = (runs["status"] == "ok").sum()
+        ok_count = (runs["status"] == "ok").sum()
         err_count = (runs["status"] == "error").sum()
         m1, m2, m3 = st.columns(3)
-        m1.metric("Total Runs",    len(runs))
+        m1.metric("Total Runs", len(runs))
         m2.metric("✅ Successful", int(ok_count))
-        m3.metric("❌ Errors",     int(err_count))
+        m3.metric("❌ Errors", int(err_count))
 
         # Timeline chart
         runs["started_at"] = pd.to_datetime(runs["started_at"])
         fig_runs = px.scatter(
-            runs, x="started_at", y="run_type",
+            runs,
+            x="started_at",
+            y="run_type",
             color="status",
             color_discrete_map={"ok": CLR_GREEN, "error": CLR_RED},
             size="rows_written",
@@ -857,16 +1198,20 @@ elif page == "🩺 ETL Health":
             template="plotly_dark",
         )
         fig_runs.update_layout(
-            plot_bgcolor=CLR_BG, paper_bgcolor=CLR_BG,
-            height=350, margin=dict(t=20, b=20),
-            xaxis_title="Time", yaxis_title="Job Type",
+            plot_bgcolor=CLR_BG,
+            paper_bgcolor=CLR_BG,
+            height=350,
+            margin=dict(t=20, b=20),
+            xaxis_title="Time",
+            yaxis_title="Job Type",
         )
         st.plotly_chart(fig_runs, use_container_width=True)
 
         # Table
         st.dataframe(
-            runs[["run_type","status","rows_written","started_at","message"]],
-            use_container_width=True, hide_index=True,
+            runs[["run_type", "status", "rows_written", "started_at", "message"]],
+            use_container_width=True,
+            hide_index=True,
         )
 
     # ── Last-seen per ticker ───────────────────────────────────────────────
@@ -877,17 +1222,22 @@ elif page == "🩺 ETL Health":
         FROM stock_quotes GROUP BY ticker ORDER BY ticker
     """)
     if not freshness.empty:
+
         def color_freshness(val):
             try:
                 v = float(val)
-                if v < 1:   return "color: #00c96f"
-                if v < 4:   return "color: #f5c842"
+                if v < 1:
+                    return "color: #00c96f"
+                if v < 4:
+                    return "color: #f5c842"
                 return "color: #ff4b4b"
             except Exception:
                 return ""
+
         st.dataframe(
             freshness.style.map(color_freshness, subset=["hours_ago"]),
-            use_container_width=True, hide_index=True,
+            use_container_width=True,
+            hide_index=True,
         )
 
 
@@ -896,7 +1246,9 @@ elif page == "🩺 ETL Health":
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "ℹ️ About":
     st.title("ℹ️ IBKR Workbench")
-    st.markdown("**A full-stack quantitative research platform** — live market data, historical bars, SEC financials, and AI-powered natural language queries, all in one place.")
+    st.markdown(
+        "**A full-stack quantitative research platform** — live market data, historical bars, SEC financials, and AI-powered natural language queries, all in one place."
+    )
 
     st.markdown("---")
 
@@ -907,12 +1259,12 @@ elif page == "ℹ️ About":
     with col1:
         st.markdown("**Market Data**")
         sources = {
-            "Polygon.io — Daily bars":     "SELECT COUNT(*) FROM polygon_bars",
-            "Polygon.io — Option bars":    "SELECT COUNT(*) FROM polygon_option_bars",
-            "Polygon.io — Snapshots":      "SELECT COUNT(*) FROM polygon_snapshots",
-            "Polygon.io — Tickers":        "SELECT COUNT(*) FROM polygon_tickers",
-            "IBKR — Stock quotes":         "SELECT COUNT(*) FROM stock_quotes",
-            "IBKR — Option quotes":        "SELECT COUNT(*) FROM option_quotes",
+            "Polygon.io — Daily bars": "SELECT COUNT(*) FROM polygon_bars",
+            "Polygon.io — Option bars": "SELECT COUNT(*) FROM polygon_option_bars",
+            "Polygon.io — Snapshots": "SELECT COUNT(*) FROM polygon_snapshots",
+            "Polygon.io — Tickers": "SELECT COUNT(*) FROM polygon_tickers",
+            "IBKR — Stock quotes": "SELECT COUNT(*) FROM stock_quotes",
+            "IBKR — Option quotes": "SELECT COUNT(*) FROM option_quotes",
         }
         for label, sql in sources.items():
             n = q(sql)
@@ -923,10 +1275,10 @@ elif page == "ℹ️ About":
     with col2:
         st.markdown("**Fundamentals & AI**")
         sources2 = {
-            "SEC EDGAR — Filings":         "SELECT COUNT(*) FROM edgar_filings",
-            "SEC EDGAR — XBRL Facts":      "SELECT COUNT(*) FROM edgar_facts",
-            "CFTC — COT Reports":          "SELECT COUNT(*) FROM cot_reports",
-            "Ticker embeddings (RAG)":     "SELECT COUNT(*) FROM ticker_embeddings",
+            "SEC EDGAR — Filings": "SELECT COUNT(*) FROM edgar_filings",
+            "SEC EDGAR — XBRL Facts": "SELECT COUNT(*) FROM edgar_facts",
+            "CFTC — COT Reports": "SELECT COUNT(*) FROM cot_reports",
+            "Ticker embeddings (RAG)": "SELECT COUNT(*) FROM ticker_embeddings",
         }
         for label, sql in sources2.items():
             n = q(sql)
@@ -937,7 +1289,7 @@ elif page == "ℹ️ About":
         st.markdown("")
         st.markdown("**AI Provider**")
         provider = os.getenv("CHAT_PROVIDER", "deepseek").title()
-        model    = os.getenv("CHAT_MODEL", "")
+        model = os.getenv("CHAT_MODEL", "")
         st.markdown(f"🤖 **{provider}** {f'— `{model}`' if model else ''}")
 
     st.markdown("---")
@@ -945,16 +1297,16 @@ elif page == "ℹ️ About":
     # ── Asset coverage ─────────────────────────────────────────────────────
     st.subheader("📊 Asset Coverage")
     assets = [
-        ("US Equities",        "~11,200 tickers",   "NYSE · NASDAQ · AMEX"),
-        ("Forex",              "17 pairs",           "EUR/USD, GBP/USD, USD/JPY + 14 more"),
-        ("Equity Futures",     "6 contracts",        "ES, NQ, RTY, YM + micros (CME)"),
-        ("Energy Futures",     "5 contracts",        "CL, NG, RB, HO, BZ (NYMEX)"),
-        ("Metals Futures",     "5 contracts",        "GC, SI, HG, PL, PA (COMEX)"),
-        ("Rate Futures",       "5 contracts",        "ZB, ZN, ZF, ZT, ZQ (CBOT)"),
-        ("Ag Futures",         "8 contracts",        "ZC, ZS, ZW + 5 more (CBOT)"),
-        ("FX Futures",         "7 contracts",        "6E, 6B, 6J, 6C, 6A, 6S, 6N (CME)"),
-        ("Crypto Futures",     "4 contracts",        "BTC, ETH, MBT, MET (CME)"),
-        ("Cash Indices",       "10 indices",         "SPX, VIX, NDX, RUT, DJX + global"),
+        ("US Equities", "~11,200 tickers", "NYSE · NASDAQ · AMEX"),
+        ("Forex", "17 pairs", "EUR/USD, GBP/USD, USD/JPY + 14 more"),
+        ("Equity Futures", "6 contracts", "ES, NQ, RTY, YM + micros (CME)"),
+        ("Energy Futures", "5 contracts", "CL, NG, RB, HO, BZ (NYMEX)"),
+        ("Metals Futures", "5 contracts", "GC, SI, HG, PL, PA (COMEX)"),
+        ("Rate Futures", "5 contracts", "ZB, ZN, ZF, ZT, ZQ (CBOT)"),
+        ("Ag Futures", "8 contracts", "ZC, ZS, ZW + 5 more (CBOT)"),
+        ("FX Futures", "7 contracts", "6E, 6B, 6J, 6C, 6A, 6S, 6N (CME)"),
+        ("Crypto Futures", "4 contracts", "BTC, ETH, MBT, MET (CME)"),
+        ("Cash Indices", "10 indices", "SPX, VIX, NDX, RUT, DJX + global"),
     ]
     df_assets = pd.DataFrame(assets, columns=["Asset Class", "Coverage", "Notes"])
     st.dataframe(df_assets, use_container_width=True, hide_index=True)
@@ -964,13 +1316,16 @@ elif page == "ℹ️ About":
     # ── Dashboard pages ────────────────────────────────────────────────────
     st.subheader("🖥️ Dashboard Pages")
     pages = [
-        ("💬 Chat",           "Text-to-SQL + RAG — ask anything in plain English"),
-        ("📊 Stock Quotes",   "Live IBKR prices, bid-ask spreads, volume"),
-        ("📉 Price History",  "Candlestick / OHLC / line charts with volume"),
-        ("📦 Polygon OHLCV",  "Full-history daily bars with VWAP and period return"),
-        ("🔗 Options Chain",  "IV smile, Greeks heatmap, OI/volume, full chain table"),
-        ("💸 Cost Calculator","Round-trip slippage — spread + commission + market impact"),
-        ("🩺 ETL Health",     "Job run log, row counts, data freshness per ticker"),
+        ("💬 Chat", "Text-to-SQL + RAG — ask anything in plain English"),
+        ("📊 Stock Quotes", "Live IBKR prices, bid-ask spreads, volume"),
+        ("📉 Price History", "Candlestick / OHLC / line charts with volume"),
+        ("📦 Polygon OHLCV", "Full-history daily bars with VWAP and period return"),
+        ("🔗 Options Chain", "IV smile, Greeks heatmap, OI/volume, full chain table"),
+        (
+            "💸 Cost Calculator",
+            "Round-trip slippage — spread + commission + market impact",
+        ),
+        ("🩺 ETL Health", "Job run log, row counts, data freshness per ticker"),
     ]
     for icon_name, desc in pages:
         st.markdown(f"**{icon_name}** — {desc}")
@@ -1004,7 +1359,8 @@ elif page == "ℹ️ About":
 
     # ── Quick reference ────────────────────────────────────────────────────
     st.subheader("⚡ Quick Reference")
-    st.code("""
+    st.code(
+        """
 # Download full history from Polygon
 python main.py --job polygon-bars
 
@@ -1025,4 +1381,6 @@ streamlit run dashboard/app.py
 
 # Run everything in Docker
 docker compose up --build
-    """, language="bash")
+    """,
+        language="bash",
+    )

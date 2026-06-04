@@ -9,7 +9,6 @@ from typing import Callable, Dict, Optional
 from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
 from ibapi.contract import Contract
-from ibapi.ticktype import TickTypeEnum
 from loguru import logger
 
 from etl.utils import utcnow as _utcnow
