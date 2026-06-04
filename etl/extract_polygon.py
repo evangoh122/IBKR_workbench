@@ -48,7 +48,7 @@ def run_polygon_bars_etl(
                 for a in aggs:
                     ts = _ms_to_iso(getattr(a, "timestamp", None))
                     conn.execute("""
-                        INSERT OR REPLACE INTO polygon_bars
+                        INSERT OR IGNORE INTO polygon_bars
                             (ticker, ts, timespan, open, high, low, close,
                              volume, vwap, transactions)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
