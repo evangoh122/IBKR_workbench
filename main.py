@@ -223,6 +223,11 @@ def job_polygon_all():
     job_polygon_bars()
     job_polygon_snapshots()
     job_polygon_options()
+    
+    # If explicitly requested, or if ticks are the primary data type, run them too
+    data_type = os.getenv("POLYGON_DATA_TYPE", "bar").lower()
+    if data_type == "tick":
+        job_polygon_ticks()
 
 
 @etl_job("embed-tickers")
