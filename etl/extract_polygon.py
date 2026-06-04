@@ -189,6 +189,12 @@ def run_polygon_options_etl(
                 total += count
                 logger.debug(f"polygon options {symbol}: {count} contracts")
             except Exception as e:
+                if "NOT_AUTHORIZED" in str(e) or "not entitled" in str(e).lower():
+                    logger.error(
+                        "Polygon options require a paid plan — aborting job. "
+                        "Upgrade at https://polygon.io/dashboard/api-keys"
+                    )
+                    return 0
                 logger.warning(f"polygon options failed for {symbol}: {e}")
 
     logger.info(f"polygon options ETL complete: {total} contracts across {len(tickers)} tickers")
@@ -303,6 +309,12 @@ def run_polygon_option_bars_etl(
                     if len(contracts) >= max_contracts:
                         break
             except Exception as e:
+                if "NOT_AUTHORIZED" in str(e) or "not entitled" in str(e).lower():
+                    logger.error(
+                        "Polygon option bars require a paid plan — aborting job. "
+                        "Upgrade at https://polygon.io/dashboard/api-keys"
+                    )
+                    return 0
                 logger.warning(f"Couldn't list contracts for {underlying}: {e}")
                 continue
 
