@@ -14,7 +14,7 @@ Run:
 """
 import time
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List
 
 from loguru import logger
 from polygon import RESTClient

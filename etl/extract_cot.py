@@ -5,8 +5,7 @@ Pulls Legacy (Futures Only) reports.
 """
 import requests
 from loguru import logger
-from datetime import datetime, timezone
-from typing import List, Optional, Dict
+from typing import List, Optional
 from db.database import get_connection
 
 _BASE_URL = "https://publicreporting.cftc.gov/resource/6dca-aqww.json"

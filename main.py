@@ -23,6 +23,7 @@ import sys
 import time
 import warnings
 from datetime import datetime, timezone
+from functools import wraps
 
 # Suppress specific Python 3.14 / dependency warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="langchain_core")
@@ -79,7 +80,7 @@ logger.add("logs/etl_{time:YYYY-MM-DD}.log", rotation="1 day",
 
 
 # ── Lazy import after env is loaded ──────────────────────────────────────────
-from db.database import init_db
+from db.database import init_db, get_connection
 from etl.ibkr_client import IBKRClient
 from etl.extract_stocks import run_stock_etl
 from etl.extract_options import refresh_option_chains, run_option_etl
@@ -96,10 +97,6 @@ from etl.embed_tickers import run_embed_tickers_etl
 from etl.extract_edgar import run_edgar_filings_etl, run_edgar_facts_etl
 from etl.embed_edgar import run_embed_edgar_etl
 from etl.extract_cot import run_cot_etl
-
-
-from functools import wraps
-from db.database import get_connection
 
 # ── ETL helpers ───────────────────────────────────────────────────────────────
 

@@ -14,6 +14,7 @@ def test_init_creates_tables(tmp_db):
     assert "option_quotes" in tables
     assert "option_chains" in tables
     assert "etl_runs"      in tables
+    assert "cot_reports"   in tables
 
 
 def test_init_is_idempotent(tmp_db):
