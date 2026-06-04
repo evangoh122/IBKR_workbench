@@ -1,126 +1,4 @@
 groups:
-  forex_majors:
-    description: Major FX pairs
-    secType: CASH
-    exchange: IDEALPRO
-    tickers:
-    - EUR.USD
-    - GBP.USD
-    - USD.JPY
-    - USD.CHF
-    - AUD.USD
-    - USD.CAD
-    - NZD.USD
-  forex_minors:
-    description: Minor FX pairs
-    secType: CASH
-    exchange: IDEALPRO
-    tickers:
-    - EUR.GBP
-    - EUR.JPY
-    - EUR.AUD
-    - EUR.CAD
-    - EUR.CHF
-    - GBP.JPY
-    - GBP.AUD
-    - AUD.JPY
-    - AUD.NZD
-    - CAD.JPY
-  indices_us:
-    description: US cash indices
-    secType: IND
-    exchange: CBOE
-    tickers:
-    - SPX
-    - VIX
-    - NDX
-    - RUT
-    - DJX
-  indices_global:
-    description: Global cash indices
-    secType: IND
-    exchange: CBOE
-    tickers:
-    - HSI
-    - N225
-    - GDAXI
-    - FTSE
-    - CAC40
-  futures_equity:
-    description: Equity index futures (CME)
-    secType: FUT
-    exchange: CME
-    tickers:
-    - ES
-    - NQ
-    - RTY
-    - YM
-    - MES
-    - MNQ
-  futures_energy:
-    description: Energy futures (NYMEX)
-    secType: FUT
-    exchange: NYMEX
-    tickers:
-    - CL
-    - NG
-    - RB
-    - HO
-    - BZ
-  futures_metals:
-    description: Metals futures (COMEX)
-    secType: FUT
-    exchange: COMEX
-    tickers:
-    - GC
-    - SI
-    - HG
-    - PL
-    - PA
-  futures_rates:
-    description: Interest rate futures (CBOT)
-    secType: FUT
-    exchange: CBOT
-    tickers:
-    - ZB
-    - ZN
-    - ZF
-    - ZT
-    - ZQ
-  futures_ag:
-    description: Agricultural futures (CBOT)
-    secType: FUT
-    exchange: CBOT
-    tickers:
-    - ZC
-    - ZS
-    - ZW
-    - ZL
-    - ZM
-    - KE
-    - ZO
-    - ZR
-  futures_fx:
-    description: FX futures (CME)
-    secType: FUT
-    exchange: CME
-    tickers:
-    - 6E
-    - 6B
-    - 6J
-    - 6C
-    - 6A
-    - 6S
-    - 6N
-  futures_crypto:
-    description: Crypto futures (CME)
-    secType: FUT
-    exchange: CME
-    tickers:
-    - BTC
-    - ETH
-    - MBT
-    - MET
   advertising_agencies:
     tickers:
     - ACCS
@@ -147,7 +25,6 @@ groups:
     - NEXN
     - OMC
     - QNST
-    - SOPA
     - STFS
     - STGW
     - SWAG
@@ -202,7 +79,6 @@ groups:
     - GPUS
     - HAWK
     - HEI
-    - HEI-A
     - HII
     - HOVR
     - HWM
@@ -218,7 +94,6 @@ groups:
     - MDA
     - MNTS
     - MOB
-    - MOG-A
     - MRCY
     - MRLN
     - NOC
@@ -238,7 +113,6 @@ groups:
     - SATL
     - SIDU
     - SIF
-    - SPACEX
     - SPAI
     - SPCE
     - SWBI
@@ -772,7 +646,6 @@ groups:
     - FDBC
     - FDSB
     - FFBC
-    - FFIC
     - FFIN
     - FGBI
     - FHB
@@ -989,8 +862,6 @@ groups:
     - TAP
   beverages_non_alcoholic:
     tickers:
-    - AKO-A
-    - AKO-B
     - BRFH
     - BUDA
     - CCEP
@@ -1011,8 +882,6 @@ groups:
     tickers:
     - AGCC
     - AMSS
-    - BF-A
-    - BF-B
     - DEO
     - EPSM
     - IBG
@@ -1471,7 +1340,6 @@ groups:
     - PROK
     - PRQR
     - PRTA
-    - PRTC
     - PSTV
     - PTCT
     - PTGX
@@ -1558,7 +1426,6 @@ groups:
     - TENX
     - TGTX
     - TIL
-    - TKVA
     - TLSA
     - TLX
     - TNGX
@@ -1717,10 +1584,8 @@ groups:
     - BTBT
     - BTCS
     - BTGO
-    - BTM
     - CANG
     - CD
-    - CLRS
     - CLSK
     - CNCK
     - COHN
@@ -2911,7 +2776,6 @@ groups:
     - ACEI
     - ACEP
     - ACES
-    - ACGO
     - ACGR
     - ACII
     - ACIO
@@ -3282,9 +3146,7 @@ groups:
     - BFXU
     - BGCG
     - BGDV
-    - BGEG
     - BGGG
-    - BGIA
     - BGIG
     - BGLD
     - BGRN
@@ -3415,7 +3277,6 @@ groups:
     - BRRR
     - BRTR
     - BRZU
-    - BRZX
     - BSCQ
     - BSCR
     - BSCS
@@ -3462,7 +3323,6 @@ groups:
     - BTCZ
     - BTF
     - BTGD
-    - BTOP
     - BTOT
     - BTR
     - BTRN
@@ -3500,7 +3360,6 @@ groups:
     - BUYZ
     - BUZZ
     - BVAL
-    - BWEB
     - BWET
     - BWOW
     - BWTG
@@ -3564,7 +3423,6 @@ groups:
     - CCNR
     - CCOM
     - CCOR
-    - CCPX
     - CCRP
     - CCSB
     - CCSO
@@ -4214,7 +4072,6 @@ groups:
     - EMTY
     - EMXC
     - EMXF
-    - EMXX
     - ENDW
     - ENFR
     - ENHI
@@ -4295,7 +4152,6 @@ groups:
     - EUSA
     - EUSB
     - EUV
-    - EUVX
     - EVHY
     - EVIM
     - EVLN
@@ -5055,7 +4911,6 @@ groups:
     - HYLS
     - HYMB
     - HYP
-    - HYPG
     - HYS
     - HYSA
     - HYSD
@@ -5281,7 +5136,6 @@ groups:
     - INTW
     - INVG
     - INVN
-    - INYY
     - IOCT
     - ION
     - IONL
@@ -5624,7 +5478,6 @@ groups:
     - KRE
     - KRMA
     - KROP
-    - KRWX
     - KRYP
     - KSA
     - KSEP
@@ -5797,7 +5650,6 @@ groups:
     - MBB
     - MBBA
     - MBBB
-    - MBCE
     - MBND
     - MBOX
     - MBS
@@ -5852,7 +5704,6 @@ groups:
     - MFVL
     - MGC
     - MGK
-    - MGKX
     - MGMT
     - MGNR
     - MGOV
@@ -6251,7 +6102,6 @@ groups:
     - OVM
     - OVS
     - OVT
-    - OWN
     - OWNB
     - OWNS
     - OZEM
@@ -7281,7 +7131,6 @@ groups:
     - TAGG
     - TAGS
     - TAIL
-    - TAJX
     - TALV
     - TAN
     - TAOZ
@@ -7479,8 +7328,6 @@ groups:
     - TRUD
     - TRUF
     - TRUH
-    - TRUI
-    - TRUO
     - TRUT
     - TSCM
     - TSCV
@@ -7674,7 +7521,6 @@ groups:
     - USTB
     - USVM
     - USVN
-    - USX
     - USXF
     - UTEN
     - UTES
@@ -7722,7 +7568,6 @@ groups:
     - VBNB
     - VBND
     - VBR
-    - VBX
     - VCEB
     - VCIT
     - VCLN
@@ -7800,7 +7645,6 @@ groups:
     - VOO
     - VOOG
     - VOOV
-    - VOOX
     - VOT
     - VOTE
     - VOX
@@ -7889,7 +7733,6 @@ groups:
     - WEAT
     - WEBL
     - WEBS
-    - WEBX
     - WEED
     - WEEI
     - WEEK
@@ -7933,12 +7776,10 @@ groups:
     - WUGI
     - WULX
     - WWJD
-    - WX
     - WXET
     - WZRD
     - XA
     - XAGG
-    - XAGI
     - XAIX
     - XAPR
     - XAR
@@ -7950,7 +7791,6 @@ groups:
     - XBFR
     - XBI
     - XBIL
-    - XBIX
     - XBJA
     - XBJL
     - XBNB
@@ -7963,7 +7803,6 @@ groups:
     - XCHG
     - XCLR
     - XCNY
-    - XCOM
     - XCOR
     - XDAT
     - XDEC
@@ -7975,7 +7814,6 @@ groups:
     - XEMD
     - XEML
     - XES
-    - XEUR
     - XEY
     - XFEB
     - XFIV
@@ -7983,7 +7821,6 @@ groups:
     - XHB
     - XHE
     - XHLF
-    - XHOA
     - XHS
     - XIDE
     - XIDV
@@ -7991,46 +7828,35 @@ groups:
     - XIMR
     - XISE
     - XITK
-    - XIWC
     - XJAN
     - XJH
     - XJR
     - XJUL
     - XJUN
-    - XKRE
     - XLB
     - XLBI
-    - XLBX
     - XLC
     - XLCI
     - XLE
     - XLEI
-    - XLEX
     - XLF
     - XLFI
-    - XLFX
     - XLG
     - XLI
     - XLII
-    - XLIX
     - XLK
     - XLKI
-    - XLKX
     - XLP
-    - XLPX
     - XLRE
     - XLRI
     - XLSI
     - XLSR
     - XLU
     - XLUI
-    - XLUX
     - XLV
     - XLVI
-    - XLVX
     - XLY
     - XLYI
-    - XLYX
     - XMAG
     - XMAR
     - XMAY
@@ -8053,7 +7879,6 @@ groups:
     - XOP
     - XOVL
     - XOVR
-    - XPAV
     - XPAY
     - XPEG
     - XPH
@@ -8071,7 +7896,6 @@ groups:
     - XRPZ
     - XRT
     - XSD
-    - XSEM
     - XSEP
     - XSHD
     - XSHQ
@@ -8083,7 +7907,6 @@ groups:
     - XSVN
     - XSW
     - XT
-    - XTAI
     - XTAP
     - XTEN
     - XTJA
@@ -8098,10 +7921,7 @@ groups:
     - XUDV
     - XUSP
     - XV
-    - XVO
-    - XVUG
     - XVV
-    - XW
     - XXRP
     - XXV
     - XXX
@@ -8259,7 +8079,6 @@ groups:
     - ANDE
     - AVO
     - CHEF
-    - CVGW
     - DIT
     - HFFG
     - MTEX
@@ -8294,10 +8113,36 @@ groups:
     - USD.JPY
     - USD.CHF
     - AUD.USD
+  forex_majors:
+    description: Major FX pairs
+    exchange: IDEALPRO
+    secType: CASH
+    tickers:
+    - EUR.USD
+    - GBP.USD
+    - USD.JPY
+    - USD.CHF
+    - AUD.USD
+    - USD.CAD
+    - NZD.USD
+  forex_minors:
+    description: Minor FX pairs
+    exchange: IDEALPRO
+    secType: CASH
+    tickers:
+    - EUR.GBP
+    - EUR.JPY
+    - EUR.AUD
+    - EUR.CAD
+    - EUR.CHF
+    - GBP.JPY
+    - GBP.AUD
+    - AUD.JPY
+    - AUD.NZD
+    - CAD.JPY
   furnishings_fixtures_and_appliances:
     tickers:
     - ALH
-    - AMWD
     - ATER
     - BSET
     - COOK
@@ -8337,6 +8182,81 @@ groups:
     - NQ
     - YM
     - RTY
+  futures_ag:
+    description: Agricultural futures (CBOT)
+    exchange: CBOT
+    secType: FUT
+    tickers:
+    - ZC
+    - ZS
+    - ZW
+    - ZL
+    - ZM
+    - KE
+    - ZO
+    - ZR
+  futures_crypto:
+    description: Crypto futures (CME)
+    exchange: CME
+    secType: FUT
+    tickers:
+    - BTC
+    - ETH
+    - MBT
+    - MET
+  futures_energy:
+    description: Energy futures (NYMEX)
+    exchange: NYMEX
+    secType: FUT
+    tickers:
+    - CL
+    - NG
+    - RB
+    - HO
+    - BZ
+  futures_equity:
+    description: Equity index futures (CME)
+    exchange: CME
+    secType: FUT
+    tickers:
+    - ES
+    - NQ
+    - RTY
+    - YM
+    - MES
+    - MNQ
+  futures_fx:
+    description: FX futures (CME)
+    exchange: CME
+    secType: FUT
+    tickers:
+    - 6E
+    - 6B
+    - 6J
+    - 6C
+    - 6A
+    - 6S
+    - 6N
+  futures_metals:
+    description: Metals futures (COMEX)
+    exchange: COMEX
+    secType: FUT
+    tickers:
+    - GC
+    - SI
+    - HG
+    - PL
+    - PA
+  futures_rates:
+    description: Interest rate futures (CBOT)
+    exchange: CBOT
+    secType: FUT
+    tickers:
+    - ZB
+    - ZN
+    - ZF
+    - ZT
+    - ZQ
   gambling:
     tickers:
     - ACEL
@@ -8527,6 +8447,26 @@ groups:
     - VIX
     - NDX
     - RUT
+  indices_global:
+    description: Global cash indices
+    exchange: CBOE
+    secType: IND
+    tickers:
+    - HSI
+    - N225
+    - GDAXI
+    - FTSE
+    - CAC40
+  indices_us:
+    description: US cash indices
+    exchange: CBOE
+    secType: IND
+    tickers:
+    - SPX
+    - VIX
+    - NDX
+    - RUT
+    - DJX
   industrial_distribution:
     tickers:
     - AIT
@@ -8638,8 +8578,6 @@ groups:
     - ARX
     - BRO
     - BWIN
-    - CRD-A
-    - CRD-B
     - CRVL
     - EHTH
     - ERIE
@@ -8661,8 +8599,6 @@ groups:
     - AEG
     - AIG
     - BNT
-    - BRK-A
-    - BRK-B
     - HIG
     - IGIC
     - PLGO
@@ -8778,7 +8714,6 @@ groups:
     - ELOG
     - EXPD
     - FDX
-    - FDX-WI
     - FLX
     - FWRD
     - GVH
@@ -9296,7 +9231,6 @@ groups:
     - AMZN
     - META
     - TSLA
-    - BRK B
     - JPM
     - V
   metal_fabrication:
@@ -9451,7 +9385,6 @@ groups:
     - LB
     - LBRT
     - LSE
-    - MHM
     - NCSM
     - NESR
     - NEXT
@@ -9491,7 +9424,6 @@ groups:
     - IMO
     - NFG
     - PBR
-    - PBR-A
     - SHEL
     - SKYQ
     - SLNG
@@ -9659,7 +9591,6 @@ groups:
     - VOXR
   packaged_foods:
     tickers:
-    - ABVE
     - ATPC
     - BGS
     - BHST
@@ -9789,7 +9720,6 @@ groups:
     - ERII
     - FTEK
     - LIQT
-    - NVRI-WI
     - PCT
     - RAIN
     - SCWO
@@ -10067,7 +9997,6 @@ groups:
     - SUI
     - UDR
     - UMH
-    - VRE
   reit_retail:
     tickers:
     - ADC
@@ -10135,7 +10064,6 @@ groups:
     - R
     - SUNB
     - UHAL
-    - UHAL-B
     - URI
     - VSTS
     - WLFC
@@ -10407,7 +10335,6 @@ groups:
     - ACGC
     - ADAC
     - AEAQ
-    - AESPU
     - AEXA
     - AFJK
     - AIIA
@@ -10419,8 +10346,6 @@ groups:
     - AMAN
     - ANSC
     - APAC
-    - APMCU
-    - APNAU
     - APURU
     - APXT
     - ARCI
@@ -10432,7 +10357,6 @@ groups:
     - BACC
     - BAYA
     - BBCQ
-    - BCACU
     - BCAR
     - BCSS
     - BDCI
@@ -10479,7 +10403,6 @@ groups:
     - CXIIU
     - DAAQ
     - DBCA
-    - DGAC-U
     - DMAA
     - DMII
     - DNMX
@@ -10490,7 +10413,6 @@ groups:
     - DYOR
     - EGHA
     - EMIS
-    - ETSS-U
     - EURK
     - EVAC
     - EVOX
@@ -10507,7 +10429,6 @@ groups:
     - FVN
     - FXACU
     - GCGRU
-    - GIG
     - GIW
     - GIX
     - GLED
@@ -10533,7 +10454,6 @@ groups:
     - IACQU
     - IBAC
     - IDACU
-    - IDIAU
     - IEAG
     - IGAC
     - ILLU
@@ -10548,10 +10468,7 @@ groups:
     - JATT
     - JENA
     - KBON
-    - KCA-U
-    - KCAC-U
     - KCHV
-    - KEYYU
     - KFII
     - KOYN
     - KPET
@@ -10571,7 +10488,6 @@ groups:
     - LPAA
     - LPBB
     - LPCV
-    - LTGRU
     - LWAC
     - MACI
     - MBAV
@@ -10584,9 +10500,7 @@ groups:
     - MLAA
     - MLAC
     - MMTX
-    - MRCOU
     - MTAL
-    - MTNE-U
     - MUZE
     - MYX
     - MZYX
@@ -10604,7 +10518,6 @@ groups:
     - OIM
     - ONCH
     - ORIQ
-    - OTAI-U
     - OTGA
     - OYSE
     - PAAC
@@ -10616,7 +10529,6 @@ groups:
     - PECEU
     - PGAC
     - PLMK
-    - PLUN-U
     - PMTR
     - POLE
     - PONO
@@ -10624,7 +10536,6 @@ groups:
     - PTOR
     - QADR
     - QETA
-    - QLEP-U
     - QRED
     - QSEA
     - QUMS
@@ -10649,7 +10560,6 @@ groups:
     - SCPQ
     - SDHI
     - SIMA
-    - SKAIU
     - SOCA
     - SORN
     - SOUL
@@ -10817,7 +10727,6 @@ groups:
     - KNRX
     - KVYO
     - LAW
-    - LFTO
     - LGCL
     - LIF
     - LPSN
@@ -11300,7 +11209,6 @@ groups:
     - SXI
     - SYM
     - TAYD
-    - THR
     - TNC
     - TWIN
     - WFF
@@ -11546,7 +11454,6 @@ groups:
     - CCJ
     - DNN
     - EU
-    - FISN
     - ISOU
     - JAGU
     - LEU
@@ -11671,7 +11578,6 @@ groups:
     - NRGV
     - NXXT
     - ORA
-    - PBK
     - RNW
     - SAFX
     - STEM
