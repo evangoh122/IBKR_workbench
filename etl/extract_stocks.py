@@ -3,15 +3,14 @@ etl/extract_stocks.py
 Pulls stock quotes (bid/ask/last/volume/OHLC) for configured tickers
 and writes them to the stock_quotes table.
 """
-import time
 import threading
-from datetime import datetime, timezone
 from typing import List
 
 from loguru import logger
 
 from db.database import get_connection
 from etl.ibkr_client import IBKRClient
+from etl.utils import utcnow as _utcnow
 
 
 def run_stock_etl(client: IBKRClient, tickers: List[dict]) -> int:
@@ -84,7 +83,3 @@ def run_stock_etl(client: IBKRClient, tickers: List[dict]) -> int:
 
     logger.info(f"Wrote {len(rows)} stock quote rows")
     return len(rows)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")

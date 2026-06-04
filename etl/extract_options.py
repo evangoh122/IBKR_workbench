@@ -6,7 +6,6 @@ Two-phase options ETL:
 """
 import os
 import threading
-from datetime import datetime, timezone
 from typing import List
 
 from loguru import logger
@@ -14,6 +13,7 @@ from loguru import logger
 from db.database import get_connection
 from etl.ibkr_client import IBKRClient
 from config.tickers import get_expiry_cycles
+from etl.utils import utcnow as _utcnow
 
 
 # How many nearest expiries to actually quote (chain discovery returns all)
@@ -191,7 +191,3 @@ def run_option_etl(client: IBKRClient, tickers: List[dict],
 
     logger.info(f"Wrote {len(all_rows)} option quote rows")
     return len(all_rows)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")

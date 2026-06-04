@@ -17,6 +17,7 @@ from loguru import logger
 from polygon import RESTClient
 
 from db.database import get_connection
+from etl.utils import utcnow as _utcnow
 
 
 # ── OHLCV bars ────────────────────────────────────────────────────────────────
@@ -431,7 +432,3 @@ def _ms_to_iso(ms: Optional[int]) -> Optional[str]:
     if ms is None:
         return None
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat(timespec="seconds")
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")

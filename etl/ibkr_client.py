@@ -4,15 +4,14 @@ Thread-safe IBKR TWS API wrapper.
 Handles connection, market data requests, and option chain discovery.
 """
 import threading
-import time
-from datetime import datetime, timezone
 from typing import Callable, Dict, Optional
 
 from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
 from ibapi.contract import Contract
-from ibapi.ticktype import TickTypeEnum
 from loguru import logger
+
+from etl.utils import utcnow as _utcnow
 
 
 # ── Tick-type mappings we care about ──────────────────────────────────────────
@@ -319,9 +318,3 @@ class IBKRClient(EWrapper, EClient):
         results = self._chain_results.pop(req_id, [])
         self._chain_done.pop(req_id, None)
         return results
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")

@@ -108,15 +108,16 @@ def etl_run_log(limit: int = 20) -> pd.DataFrame:
 
 def search_similar_tickers(query_vector: list, limit: int = 5) -> pd.DataFrame:
     """Find tickers with similar embeddings using DuckDB VSS."""
+    # Ensure flat Python list of floats (handles numpy arrays, nested lists, etc.)
+    vec = [float(x) for x in query_vector]
     with _conn() as conn:
-        # Cast vector to FLOAT[384] array
-        df = conn.execute(f"""
+        df = conn.execute("""
             SELECT ticker, industry, text,
-                   array_distance(embedding, {query_vector}::FLOAT[384]) as distance
+                   array_distance(embedding, ?::FLOAT[384]) as distance
             FROM ticker_embeddings
             ORDER BY distance
             LIMIT ?
-        """, (limit,)).df()
+        """, [vec, limit]).df()
     return df
 
 

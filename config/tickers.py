@@ -4,7 +4,7 @@ Loads ticker lists and per-ticker options config from tickers.yaml.
 """
 import os
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import yaml
 
@@ -13,6 +13,13 @@ _DEFAULT_YAML = str(Path(__file__).parent / "tickers.yaml")
 
 def load_config() -> dict:
     path = os.getenv("TICKERS_YAML", _DEFAULT_YAML)
+    if not Path(path).exists():
+        from loguru import logger
+        logger.warning(
+            f"Tickers config not found at '{path}' — returning empty config. "
+            f"Set TICKERS_YAML in .env or create the file."
+        )
+        return {"groups": {}}
     with open(path, "r") as f:
         return yaml.safe_load(f)
 

@@ -11,6 +11,7 @@ Data stored:
   edgar_filings  – filing metadata (form type, date, accession number)
   edgar_facts    – numerical XBRL facts per ticker/concept/period
 """
+import os
 import time
 from typing import Dict, List, Optional
 
@@ -20,8 +21,15 @@ from loguru import logger
 from db.database import get_connection
 
 # SEC requires a descriptive User-Agent: "Name email@domain.com"
+_EMAIL   = os.getenv("EDGAR_EMAIL", "")
+if not _EMAIL:
+    _EMAIL = "research@example.com"
+    logger.warning(
+        "EDGAR_EMAIL not set in .env — using placeholder. "
+        "SEC may throttle requests. Set EDGAR_EMAIL to your real email."
+    )
 _HEADERS = {
-    "User-Agent": "IBKR-Workbench research@example.com",
+    "User-Agent": f"IBKR-Workbench {_EMAIL}",
     "Accept":     "application/json",
 }
 _BASE    = "https://data.sec.gov"
