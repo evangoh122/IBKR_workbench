@@ -23,19 +23,19 @@ warnings.filterwarnings("ignore", message=".*urllib3.*match a supported version"
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-import duckdb
-from datetime import datetime, timezone, timedelta
+import duckdb  # noqa: E402
+from datetime import datetime, timezone, timedelta  # noqa: E402
 
-import pandas as pd
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
-import streamlit as st
-from dotenv import load_dotenv
+import pandas as pd  # noqa: E402
+import plotly.graph_objects as go  # noqa: E402
+import plotly.express as px  # noqa: E402
+from plotly.subplots import make_subplots  # noqa: E402
+import streamlit as st  # noqa: E402
+from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(ROOT / ".env")
 
-from etl.slippage import calculate_costs, SlippageToggles
+from etl.slippage import calculate_costs, SlippageToggles  # noqa: E402
 
 DB_PATH = os.getenv("DB_PATH", str(ROOT / "data" / "ibkr.duckdb"))
 

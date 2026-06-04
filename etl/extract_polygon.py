@@ -271,7 +271,7 @@ def run_polygon_option_bars_etl(
     client: RESTClient,
     tickers: List[dict],
     timespan: str = "day",
-    lookback_days: int = 9500,
+    lookback_days: int = 730,
     max_contracts: int = 250,
 ) -> int:
     """
