@@ -12,18 +12,25 @@ Usage:
     python main.py --job polygon-quotes  # polygon stock snapshots only
     python main.py --job polygon-options # polygon options chain only
     python main.py --job polygon-ref     # polygon ticker reference only
+    python main.py --job polygon-ticks   # polygon trade ticks only (requires START_DATE/END_DATE)
+    python main.py --job polygon-semis   # day bars + ticks for group-filtered tickers
     python main.py --job embed-tickers   # embed polygon descriptions → DuckDB vector store
     python main.py --job edgar-filings   # EDGAR filing history (10-K, 10-Q, 8-K)
     python main.py --job edgar-facts     # EDGAR XBRL financial facts
     python main.py --job cot             # CFTC COT reports
     python main.py --schedule            # continuous mode, respects POLL_INTERVAL_SECONDS
+
+Environment variables for group filtering and tick data:
+    POLYGON_GROUPS=semiconductors,semiconductor_equipment_and_materials
+    START_DATE=2021-01-01
+    END_DATE=2026-01-01
+    POLYGON_TICK_MAX_PER_TICKER=10000000
 """
 import argparse
 import os
 import sys
 import time
 import warnings
-from datetime import datetime, timezone
 from functools import wraps
 
 # Suppress specific Python 3.14 / dependency warnings
@@ -40,7 +47,7 @@ load_dotenv()
 TWS_HOST      = os.getenv("TWS_HOST",     "127.0.0.1")
 TWS_PORT      = int(os.getenv("TWS_PORT", "4001"))
 TWS_CLIENT    = int(os.getenv("TWS_CLIENT_ID", "1"))
-from config.tickers import get_all_tickers, get_all_ticker_symbols
+from config.tickers import get_all_tickers, get_all_ticker_symbols, get_tickers_by_groups
 TICKERS       = get_all_tickers()          # List of dicts for IBKR jobs
 TICKER_SYMBOLS = get_all_ticker_symbols()  # List of strings for REST APIs
 POLL_SECS     = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
@@ -48,12 +55,21 @@ LOG_LEVEL     = os.getenv("LOG_LEVEL", "INFO")
 EXPIRY_CYCLES = int(os.getenv("OPTIONS_EXPIRY_CYCLES", "2"))
 
 POLYGON_TIMESPAN              = os.getenv("POLYGON_BARS_TIMESPAN", "day")
-POLYGON_LOOKBACK              = int(os.getenv("POLYGON_BARS_LOOKBACK", "730"))
+POLYGON_LOOKBACK              = int(os.getenv("POLYGON_BARS_LOOKBACK", "1825"))       # 5 years — bars only
+POLYGON_OPT_LOOKBACK          = int(os.getenv("POLYGON_OPTION_BARS_LOOKBACK", "730")) # 2 years — options only
 POLYGON_OPT_MAX_CONTRACTS     = int(os.getenv("POLYGON_OPTION_BARS_MAX_CONTRACTS", "1000"))
 POLYGON_OPTIONS_MAX_CONTRACTS = int(os.getenv("POLYGON_OPTIONS_MAX_CONTRACTS", "2000"))
 POLYGON_START_DATE            = os.getenv("START_DATE", "") or None
 POLYGON_END_DATE              = os.getenv("END_DATE",   "") or None
 POLYGON_TICK_MAX              = int(os.getenv("POLYGON_TICK_MAX_PER_TICKER", "10000000"))
+
+# Group filtering — if set, only include tickers from these groups
+_polygon_groups = os.getenv("POLYGON_GROUPS", "")
+if _polygon_groups:
+    _group_names = [g.strip() for g in _polygon_groups.split(",") if g.strip()]
+    TICKERS = get_tickers_by_groups(_group_names)
+    TICKER_SYMBOLS = [t["symbol"] for t in TICKERS]
+    logger.info(f"POLYGON_GROUPS filter active: {len(TICKERS)} tickers from {_group_names}")
 
 # Optional watchlist override for all polygon jobs (essential for the free tier)
 _poly_watchlist = os.getenv("POLYGON_TICKERS", "")
@@ -65,10 +81,16 @@ else:
     POLYGON_TICKERS = TICKERS
 
 # Separate watchlist for tick data — high volume, keep small
+# If POLYGON_TICK_TICKERS is not set but POLYGON_GROUPS is, use same tickers for ticks
 _tick_watchlist = os.getenv("POLYGON_TICK_TICKERS", "")
 if _tick_watchlist:
     _want_tick = {s.strip().upper() for s in _tick_watchlist.split(",")}
     POLYGON_TICK_TICKERS = [t for t in TICKERS if t.get("symbol", "").upper() in _want_tick]
+elif _polygon_groups:
+    # When filtering by groups, use same tickers for tick data — ensure POLYGON_TICK_TICKERS
+    # is set explicitly via env var if tick volume is a concern
+    logger.warning(f"POLYGON_TICK_TICKERS not set — tick data will run for all {len(TICKERS)} group tickers. Set POLYGON_TICK_TICKERS to limit scope.")
+    POLYGON_TICK_TICKERS = TICKERS
 else:
     POLYGON_TICK_TICKERS = POLYGON_TICKERS
 
@@ -189,7 +211,7 @@ def job_polygon_option_bars():
     return run_polygon_option_bars_etl(
         poly, POLYGON_TICKERS,
         timespan=POLYGON_TIMESPAN,
-        lookback_days=POLYGON_LOOKBACK,
+        lookback_days=POLYGON_OPT_LOOKBACK,
         max_contracts=POLYGON_OPT_MAX_CONTRACTS,
     )
 
@@ -214,15 +236,35 @@ def job_polygon_ticks():
     )
 
 
+@etl_job("polygon-semis")
+def job_polygon_semis():
+    """Run both day bars and tick data for semiconductor tickers."""
+    if not POLYGON_START_DATE or not POLYGON_END_DATE:
+        logger.error("polygon-semis requires START_DATE and END_DATE in .env")
+        return 0
+    poly = _polygon_client_or_exit()
+    bars_count = run_polygon_bars_etl(
+        poly, POLYGON_TICKERS, POLYGON_TIMESPAN, POLYGON_LOOKBACK,
+        from_date=POLYGON_START_DATE, to_date=POLYGON_END_DATE,
+    )
+    ticks_count = run_polygon_ticks_etl(
+        poly, POLYGON_TICK_TICKERS,
+        from_date=POLYGON_START_DATE,
+        to_date=POLYGON_END_DATE,
+        max_per_ticker=POLYGON_TICK_MAX,
+    )
+    return (bars_count or 0) + (ticks_count or 0)
+
+
 def job_polygon_all():
     job_polygon_reference()
     job_polygon_bars()
     job_polygon_snapshots()
     job_polygon_options()
     
-    # If explicitly requested, or if ticks are the primary data type, run them too
+    # Run ticks if explicitly requested or when using group filtering
     data_type = os.getenv("POLYGON_DATA_TYPE", "bar").lower()
-    if data_type == "tick":
+    if data_type == "tick" or _polygon_groups:
         job_polygon_ticks()
 
 
@@ -275,7 +317,7 @@ def main():
                             "stocks", "options", "chain", "all",
                             "polygon", "polygon-bars", "polygon-quotes",
                             "polygon-options", "polygon-option-bars", "polygon-ref",
-                            "polygon-ticks",
+                            "polygon-ticks", "polygon-semis",
                             "embed-tickers", "embed-edgar",
                             "edgar-filings", "edgar-facts", "cot",
                         ],
@@ -298,6 +340,7 @@ def main():
         "polygon-option-bars":  job_polygon_option_bars,
         "polygon-ref":          job_polygon_reference,
         "polygon-ticks":        job_polygon_ticks,
+        "polygon-semis":        job_polygon_semis,
         "embed-tickers":        job_embed_tickers,
         "embed-edgar":          job_embed_edgar,
         "edgar-filings":        job_edgar_filings,

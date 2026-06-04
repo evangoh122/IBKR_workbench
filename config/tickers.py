@@ -46,6 +46,29 @@ def get_all_tickers() -> List[dict]:
                 })
     return tickers
 
+def get_tickers_by_groups(group_names: List[str]) -> List[dict]:
+    """Return tickers from specified group names only."""
+    cfg = load_config()
+    seen = set()
+    tickers = []
+    for group_name in group_names:
+        group = cfg.get("groups", {}).get(group_name, {})
+        secType  = group.get("secType", "STK")
+        exchange = group.get("exchange", "SMART")
+        currency = group.get("currency", "USD")
+        for t in group.get("tickers", []):
+            t = str(t).strip()
+            if t and t not in seen:
+                seen.add(t)
+                tickers.append({
+                    "symbol": t,
+                    "secType": secType,
+                    "exchange": exchange,
+                    "currency": currency
+                })
+    return tickers
+
+
 def get_all_ticker_symbols() -> List[str]:
     """Return just the flat list of string symbols (legacy)."""
     return [t["symbol"] for t in get_all_tickers()]
