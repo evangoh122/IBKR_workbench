@@ -33,9 +33,11 @@ def run_polygon_bars_etl(
     from_ = from_date or (date.today() - timedelta(days=lookback_days)).isoformat()
     to_   = to_date   or date.today().isoformat()
     total = 0
+    n_total = len(tickers)
+    logger.info(f"polygon-bars: {n_total} tickers, {from_} -> {to_} ({timespan})")
 
     with get_connection() as conn:
-        for t_def in tickers:
+        for idx, t_def in enumerate(tickers, 1):
             symbol = t_def.get("symbol")
             try:
                 aggs = client.get_aggs(
@@ -67,10 +69,11 @@ def run_polygon_bars_etl(
             except Exception as e:
                 logger.warning(f"polygon bars failed for {symbol}: {e}")
             finally:
-                # Always sleep — skipping on failures causes 429 cascades
                 time.sleep(_RATE_DELAY)
+            if idx % 500 == 0:
+                logger.info(f"polygon-bars progress: {idx}/{n_total} ({idx/n_total*100:.0f}%) — {total:,} rows")
 
-    logger.info(f"polygon bars ETL complete: {total} rows across {len(tickers)} tickers")
+    logger.info(f"polygon bars ETL complete: {total:,} rows across {len(tickers)} tickers")
     return total
 
 
@@ -215,9 +218,11 @@ def run_polygon_reference_etl(
     # Reference data (descriptions, etc.) is most useful and reliable for stocks.
     # Futures and Indices often cause 404s or 429s on the free tier.
     stk_only = [t for t in tickers if t.get("secType", "STK") == "STK"]
+    n_total  = len(stk_only)
+    logger.info(f"polygon-ref: {n_total} STK tickers to fetch")
 
     with get_connection() as conn:
-        for t_def in stk_only:
+        for idx, t_def in enumerate(stk_only, 1):
             symbol = t_def.get("symbol")
             poly_ticker = _polygon_ticker(t_def)
             try:
@@ -249,6 +254,10 @@ def run_polygon_reference_etl(
             finally:
                 # Always sleep — skipping on failures causes 429 cascades
                 time.sleep(_RATE_DELAY)
+            # Progress every 500 tickers
+            if idx % 500 == 0:
+                pct = idx / n_total * 100
+                logger.info(f"polygon-ref progress: {idx}/{n_total} ({pct:.0f}%) — {total} saved")
 
         conn.commit()
     logger.info(f"polygon reference ETL complete: {total} tickers")
