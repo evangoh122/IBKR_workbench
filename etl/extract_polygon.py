@@ -228,7 +228,7 @@ def run_polygon_reference_etl(
             try:
                 d = client.get_ticker_details(poly_ticker)
                 conn.execute("""
-                    INSERT OR REPLACE INTO polygon_tickers
+                    INSERT OR IGNORE INTO polygon_tickers
                         (ticker, name, market, primary_exchange, type,
                          active, currency, description, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
