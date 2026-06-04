@@ -45,9 +45,10 @@ POLL_SECS     = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
 LOG_LEVEL     = os.getenv("LOG_LEVEL", "INFO")
 EXPIRY_CYCLES = int(os.getenv("OPTIONS_EXPIRY_CYCLES", "2"))
 
-POLYGON_TIMESPAN          = os.getenv("POLYGON_BARS_TIMESPAN", "day")
-POLYGON_LOOKBACK          = int(os.getenv("POLYGON_BARS_LOOKBACK", "9500"))
-POLYGON_OPT_MAX_CONTRACTS = int(os.getenv("POLYGON_OPTION_BARS_MAX_CONTRACTS", "250"))
+POLYGON_TIMESPAN              = os.getenv("POLYGON_BARS_TIMESPAN", "day")
+POLYGON_LOOKBACK              = int(os.getenv("POLYGON_BARS_LOOKBACK", "9500"))
+POLYGON_OPT_MAX_CONTRACTS     = int(os.getenv("POLYGON_OPTION_BARS_MAX_CONTRACTS", "1000"))
+POLYGON_OPTIONS_MAX_CONTRACTS = int(os.getenv("POLYGON_OPTIONS_MAX_CONTRACTS", "2000"))
 
 # Optional watchlist override — set POLYGON_TICKERS=SPY,AAPL,... in .env
 # to limit ALL polygon jobs to a specific subset (essential for the free tier)
@@ -168,7 +169,8 @@ def job_polygon_snapshots():
 @etl_job("polygon-options")
 def job_polygon_options():
     poly = _polygon_client_or_exit()
-    return run_polygon_options_etl(poly, POLYGON_TICKERS)
+    return run_polygon_options_etl(poly, POLYGON_TICKERS,
+                                   max_per_ticker=POLYGON_OPTIONS_MAX_CONTRACTS)
 
 
 @etl_job("polygon-option-bars")
