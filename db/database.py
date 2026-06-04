@@ -219,6 +219,25 @@ def init_db():
                 ON polygon_option_bars(option_ticker, ts)
         """)
 
+        # ── Polygon: individual trade ticks ──────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS polygon_trades (
+                ticker      TEXT    NOT NULL,
+                ts          TEXT    NOT NULL,   -- SIP timestamp, ISO-8601 microsecond UTC
+                price       REAL,
+                size        REAL,
+                conditions  TEXT,               -- comma-separated condition codes
+                exchange    INTEGER,
+                tape        TEXT,
+                created_at  TIMESTAMP DEFAULT now(),
+                UNIQUE(ticker, ts, exchange)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ptrades_ticker_ts
+                ON polygon_trades(ticker, ts)
+        """)
+
         # ── EDGAR: filing metadata ────────────────────────────────────────────
         conn.execute("""
             CREATE TABLE IF NOT EXISTS edgar_filings (

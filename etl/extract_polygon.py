@@ -26,10 +26,12 @@ def run_polygon_bars_etl(
     tickers: List[dict],
     timespan: str = "day",
     lookback_days: int = 7,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
 ) -> int:
     """Fetch aggregate bars and upsert into polygon_bars."""
-    from_ = (date.today() - timedelta(days=lookback_days)).isoformat()
-    to_   = date.today().isoformat()
+    from_ = from_date or (date.today() - timedelta(days=lookback_days)).isoformat()
+    to_   = to_date   or date.today().isoformat()
     total = 0
 
     with get_connection() as conn:

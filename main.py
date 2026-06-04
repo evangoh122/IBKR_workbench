@@ -49,9 +49,11 @@ POLYGON_TIMESPAN              = os.getenv("POLYGON_BARS_TIMESPAN", "day")
 POLYGON_LOOKBACK              = int(os.getenv("POLYGON_BARS_LOOKBACK", "9500"))
 POLYGON_OPT_MAX_CONTRACTS     = int(os.getenv("POLYGON_OPTION_BARS_MAX_CONTRACTS", "1000"))
 POLYGON_OPTIONS_MAX_CONTRACTS = int(os.getenv("POLYGON_OPTIONS_MAX_CONTRACTS", "2000"))
+POLYGON_START_DATE            = os.getenv("START_DATE", "") or None
+POLYGON_END_DATE              = os.getenv("END_DATE",   "") or None
+POLYGON_TICK_MAX              = int(os.getenv("POLYGON_TICK_MAX_PER_TICKER", "10000000"))
 
-# Optional watchlist override — set POLYGON_TICKERS=SPY,AAPL,... in .env
-# to limit ALL polygon jobs to a specific subset (essential for the free tier)
+# Optional watchlist override for all polygon jobs (essential for the free tier)
 _poly_watchlist = os.getenv("POLYGON_TICKERS", "")
 if _poly_watchlist:
     _want = {s.strip().upper() for s in _poly_watchlist.split(",")}
@@ -59,6 +61,14 @@ if _poly_watchlist:
     logger.info(f"POLYGON_TICKERS override active: {len(POLYGON_TICKERS)} tickers")
 else:
     POLYGON_TICKERS = TICKERS
+
+# Separate watchlist for tick data — high volume, keep small
+_tick_watchlist = os.getenv("POLYGON_TICK_TICKERS", "")
+if _tick_watchlist:
+    _want_tick = {s.strip().upper() for s in _tick_watchlist.split(",")}
+    POLYGON_TICK_TICKERS = [t for t in TICKERS if t.get("symbol", "").upper() in _want_tick]
+else:
+    POLYGON_TICK_TICKERS = POLYGON_TICKERS
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logger.remove()
@@ -81,6 +91,7 @@ from etl.extract_polygon import (
     run_polygon_option_bars_etl,
     run_polygon_reference_etl,
 )
+from etl.extract_polygon_ticks import run_polygon_ticks_etl
 from etl.embed_tickers import run_embed_tickers_etl
 from etl.extract_edgar import run_edgar_filings_etl, run_edgar_facts_etl
 from etl.embed_edgar import run_embed_edgar_etl
@@ -157,7 +168,10 @@ def _polygon_client_or_exit():
 @etl_job("polygon-bars")
 def job_polygon_bars():
     poly = _polygon_client_or_exit()
-    return run_polygon_bars_etl(poly, POLYGON_TICKERS, POLYGON_TIMESPAN, POLYGON_LOOKBACK)
+    return run_polygon_bars_etl(
+        poly, POLYGON_TICKERS, POLYGON_TIMESPAN, POLYGON_LOOKBACK,
+        from_date=POLYGON_START_DATE, to_date=POLYGON_END_DATE,
+    )
 
 
 @etl_job("polygon-quotes")
@@ -188,6 +202,20 @@ def job_polygon_option_bars():
 def job_polygon_reference():
     poly = _polygon_client_or_exit()
     return run_polygon_reference_etl(poly, POLYGON_TICKERS)
+
+
+@etl_job("polygon-ticks")
+def job_polygon_ticks():
+    if not POLYGON_START_DATE or not POLYGON_END_DATE:
+        logger.error("polygon-ticks requires START_DATE and END_DATE in .env")
+        return 0
+    poly = _polygon_client_or_exit()
+    return run_polygon_ticks_etl(
+        poly, POLYGON_TICK_TICKERS,
+        from_date=POLYGON_START_DATE,
+        to_date=POLYGON_END_DATE,
+        max_per_ticker=POLYGON_TICK_MAX,
+    )
 
 
 def job_polygon_all():
@@ -243,6 +271,7 @@ def main():
                             "stocks", "options", "chain", "all",
                             "polygon", "polygon-bars", "polygon-quotes",
                             "polygon-options", "polygon-option-bars", "polygon-ref",
+                            "polygon-ticks",
                             "embed-tickers", "embed-edgar",
                             "edgar-filings", "edgar-facts", "cot",
                         ],
@@ -258,16 +287,17 @@ def main():
 
     # Jobs that don't need a TWS connection
     polygon_only_jobs = {
-        "polygon":         job_polygon_all,
-        "polygon-bars":    job_polygon_bars,
-        "polygon-quotes":  job_polygon_snapshots,
+        "polygon":              job_polygon_all,
+        "polygon-bars":         job_polygon_bars,
+        "polygon-quotes":       job_polygon_snapshots,
         "polygon-options":      job_polygon_options,
         "polygon-option-bars":  job_polygon_option_bars,
-        "polygon-ref":     job_polygon_reference,
-        "embed-tickers":   job_embed_tickers,
-        "embed-edgar":     job_embed_edgar,
-        "edgar-filings":   job_edgar_filings,
-        "edgar-facts":     job_edgar_facts,
+        "polygon-ref":          job_polygon_reference,
+        "polygon-ticks":        job_polygon_ticks,
+        "embed-tickers":        job_embed_tickers,
+        "embed-edgar":          job_embed_edgar,
+        "edgar-filings":        job_edgar_filings,
+        "edgar-facts":          job_edgar_facts,
         "cot":             job_cot,
     }
     if args.job in polygon_only_jobs:
