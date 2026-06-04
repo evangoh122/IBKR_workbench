@@ -14,8 +14,8 @@ _DEFAULT_YAML = str(Path(__file__).parent / "tickers.yaml")
 def load_config() -> dict:
     path = os.getenv("TICKERS_YAML", _DEFAULT_YAML)
     if not Path(path).exists():
-        import logging
-        logging.getLogger(__name__).warning(
+        from loguru import logger
+        logger.warning(
             f"Tickers config not found at '{path}' — returning empty config. "
             f"Set TICKERS_YAML in .env or create the file."
         )
