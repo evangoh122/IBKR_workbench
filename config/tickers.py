@@ -13,6 +13,11 @@ _DEFAULT_YAML = str(Path(__file__).parent / "tickers.yaml")
 
 def load_config() -> dict:
     path = os.getenv("TICKERS_YAML", _DEFAULT_YAML)
+    if not Path(path).exists():
+        raise FileNotFoundError(
+            f"Tickers config not found at '{path}'. "
+            f"Create it or set TICKERS_YAML in .env."
+        )
     with open(path, "r") as f:
         return yaml.safe_load(f)
 

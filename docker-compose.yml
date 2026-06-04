@@ -25,5 +25,3 @@ services:
       - ./config:/app/config
     command: python main.py --job polygon-bars --schedule
     restart: unless-stopped
-    depends_on:
-      - dashboard

@@ -144,5 +144,5 @@ def _to_int(val: Optional[str]) -> Optional[int]:
         # Remove commas if any and handle float strings
         clean_val = str(val).replace(",", "")
         return int(float(clean_val))
-    except:
+    except (ValueError, TypeError):
         return None

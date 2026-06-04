@@ -83,35 +83,40 @@ class DuckDBVectorRetriever(BaseRetriever):
     def _keyword_fallback(self, query: str) -> List[Document]:
         words = [w for w in query.split() if len(w) >= 4]
         try:
-            conn = duckdb.connect(DB_PATH, read_only=True)
-            if words:
-                conditions = " OR ".join(
-                    f"description ILIKE '%{w}%' OR name ILIKE '%{w}%'" for w in words
-                )
-                sql = f"""
-                    SELECT ticker,
-                           name || ': ' || COALESCE(description, '') AS text
-                    FROM polygon_tickers
-                    WHERE description IS NOT NULL AND ({conditions})
-                    LIMIT {self.top_k}
-                """
-            else:
-                sql = f"""
-                    SELECT ticker,
-                           name || ': ' || COALESCE(description, '') AS text
-                    FROM polygon_tickers
-                    WHERE description IS NOT NULL
-                    LIMIT {self.top_k}
-                """
-            rows = conn.execute(sql).fetchall()
-            conn.close()
-            return [
-                Document(
-                    page_content=r[1],
-                    metadata={"source": "keyword_search", "ticker": r[0]},
-                )
-                for r in rows
-            ]
+            with duckdb.connect(DB_PATH, read_only=True) as conn:
+                if words:
+                    conditions = " OR ".join(
+                        "description ILIKE '%' || ? || '%' OR name ILIKE '%' || ? || '%'"
+                        for _ in words
+                    )
+                    params = []
+                    for w in words:
+                        params.extend([w, w])
+                    sql = f"""
+                        SELECT ticker,
+                               name || ': ' || COALESCE(description, '') AS text
+                        FROM polygon_tickers
+                        WHERE description IS NOT NULL AND ({conditions})
+                        LIMIT ?
+                    """
+                    params.append(self.top_k)
+                    rows = conn.execute(sql, params).fetchall()
+                else:
+                    rows = conn.execute("""
+                        SELECT ticker,
+                               name || ': ' || COALESCE(description, '') AS text
+                        FROM polygon_tickers
+                        WHERE description IS NOT NULL
+                        LIMIT ?
+                    """, [self.top_k]).fetchall()
+
+                return [
+                    Document(
+                        page_content=r[1],
+                        metadata={"source": "keyword_search", "ticker": r[0]},
+                    )
+                    for r in rows
+                ]
         except Exception as e:
             logger.warning(f"Keyword fallback failed: {e}")
             return []
@@ -130,60 +135,57 @@ class EDGARFactsRetriever(BaseRetriever):
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
     ) -> List[Document]:
         try:
-            conn = duckdb.connect(DB_PATH, read_only=True)
+            with duckdb.connect(DB_PATH, read_only=True) as conn:
+                # Find tickers mentioned in the query (case-insensitive symbol match)
+                all_tickers = conn.execute(
+                    "SELECT ticker FROM polygon_tickers"
+                ).fetchall()
+                query_upper = query.upper()
+                found = [r[0] for r in all_tickers if r[0] in query_upper]
 
-            # Find tickers mentioned in the query (case-insensitive symbol match)
-            all_tickers = conn.execute(
-                "SELECT ticker FROM polygon_tickers"
-            ).fetchall()
-            query_upper = query.upper()
-            found = [r[0] for r in all_tickers if r[0] in query_upper]
+                if not found:
+                    # Fall back to the top-k tickers by recent EDGAR activity
+                    found = [
+                        r[0] for r in conn.execute("""
+                            SELECT ticker, MAX(filed_date) AS last_filed
+                            FROM edgar_facts
+                            GROUP BY ticker
+                            ORDER BY last_filed DESC
+                            LIMIT ?
+                        """, [self.top_k]).fetchall()
+                    ]
 
-            if not found:
-                # Fall back to the top-k tickers by recent EDGAR activity
-                found = [
-                    r[0] for r in conn.execute(f"""
-                        SELECT ticker, MAX(filed_date) AS last_filed
-                        FROM edgar_facts
-                        GROUP BY ticker
-                        ORDER BY last_filed DESC
-                        LIMIT {self.top_k}
-                    """).fetchall()
+                if not found:
+                    return []
+
+                ph   = ", ".join("?" * len(found))
+                rows = conn.execute(f"""
+                    SELECT ticker, label, value, unit, period_end, form_type
+                    FROM edgar_facts
+                    WHERE ticker IN ({ph})
+                      AND form_type IN ('10-K', '10-Q')
+                      AND value IS NOT NULL
+                    ORDER BY ticker, period_end DESC
+                    LIMIT ?
+                """, found + [self.facts_per_ticker * len(found)]).fetchall()
+
+                if not rows:
+                    return []
+
+                # Group by ticker into one Document each
+                by_ticker: dict = {}
+                for ticker, label, value, unit, period_end, form_type in rows:
+                    by_ticker.setdefault(ticker, []).append(
+                        f"  {label}: {float(value):,.0f} {unit} ({period_end}, {form_type})"
+                    )
+
+                return [
+                    Document(
+                        page_content=f"{ticker} EDGAR facts:\n" + "\n".join(lines),
+                        metadata={"source": "edgar_facts", "ticker": ticker},
+                    )
+                    for ticker, lines in by_ticker.items()
                 ]
-
-            if not found:
-                conn.close()
-                return []
-
-            ph   = ", ".join("?" * len(found))
-            rows = conn.execute(f"""
-                SELECT ticker, label, value, unit, period_end, form_type
-                FROM edgar_facts
-                WHERE ticker IN ({ph})
-                  AND form_type IN ('10-K', '10-Q')
-                  AND value IS NOT NULL
-                ORDER BY ticker, period_end DESC
-                LIMIT {self.facts_per_ticker * len(found)}
-            """, found).fetchall()
-            conn.close()
-
-            if not rows:
-                return []
-
-            # Group by ticker into one Document each
-            by_ticker: dict = {}
-            for ticker, label, value, unit, period_end, form_type in rows:
-                by_ticker.setdefault(ticker, []).append(
-                    f"  {label}: {float(value):,.0f} {unit} ({period_end}, {form_type})"
-                )
-
-            return [
-                Document(
-                    page_content=f"{ticker} EDGAR facts:\n" + "\n".join(lines),
-                    metadata={"source": "edgar_facts", "ticker": ticker},
-                )
-                for ticker, lines in by_ticker.items()
-            ]
         except Exception as e:
             logger.warning(f"EDGAR facts retrieval failed: {e}")
             return []
@@ -236,37 +238,36 @@ class PriceContextRetriever(BaseRetriever):
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
     ) -> List[Document]:
         try:
-            conn = duckdb.connect(DB_PATH, read_only=True)
-            all_tickers = conn.execute(
-                "SELECT DISTINCT ticker FROM polygon_bars"
-            ).fetchall()
-            query_upper = query.upper()
-            found = [r[0] for r in all_tickers if r[0] in query_upper] or None
+            with duckdb.connect(DB_PATH, read_only=True) as conn:
+                all_tickers = conn.execute(
+                    "SELECT DISTINCT ticker FROM polygon_bars"
+                ).fetchall()
+                query_upper = query.upper()
+                found = [r[0] for r in all_tickers if r[0] in query_upper] or None
 
-            if found:
-                ph  = ", ".join("?" * len(found))
-                sql = f"""
-                    SELECT ticker, ts::DATE AS date, close, volume
-                    FROM polygon_bars
-                    WHERE ticker IN ({ph}) AND timespan = 'day'
-                    QUALIFY ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY ts DESC) = 1
-                """
-                rows = conn.execute(sql, found).fetchall()
-            else:
-                rows = []
-            conn.close()
+                if found:
+                    ph  = ", ".join("?" * len(found))
+                    sql = f"""
+                        SELECT ticker, ts::DATE AS date, close, volume
+                        FROM polygon_bars
+                        WHERE ticker IN ({ph}) AND timespan = 'day'
+                        QUALIFY ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY ts DESC) = 1
+                    """
+                    rows = conn.execute(sql, found).fetchall()
+                else:
+                    rows = []
 
-            if not rows:
-                return []
+                if not rows:
+                    return []
 
-            lines = "\n".join(
-                f"  {r[0]}: ${r[2]:.2f} on {r[1]}  (vol {int(r[3] or 0):,})"
-                for r in rows
-            )
-            return [Document(
-                page_content=f"Latest prices:\n{lines}",
-                metadata={"source": "polygon_bars"},
-            )]
+                lines = "\n".join(
+                    f"  {r[0]}: ${r[2]:.2f} on {r[1]}  (vol {int(r[3] or 0):,})"
+                    for r in rows
+                )
+                return [Document(
+                    page_content=f"Latest prices:\n{lines}",
+                    metadata={"source": "polygon_bars"},
+                )]
         except Exception as e:
             logger.warning(f"Price context retrieval failed: {e}")
             return []
@@ -313,8 +314,7 @@ def build_rag_chain():
         from langchain_anthropic import ChatAnthropic
         api_key = os.getenv(_KEY_ENV, "")
         if not api_key:
-            logger.warning(f"RAG: {_KEY_ENV} not set — using placeholder key")
-            api_key = "placeholder"
+            raise ValueError(f"RAG: {_KEY_ENV} not set in .env for provider '{_PROVIDER}'")
         llm = ChatAnthropic(model=_MODEL, api_key=api_key)
     else:
         if _KEY_ENV is None:
@@ -322,8 +322,7 @@ def build_rag_chain():
         else:
             api_key = os.getenv(_KEY_ENV, "")
             if not api_key:
-                logger.warning(f"RAG: {_KEY_ENV} not set — using placeholder key")
-                api_key = "placeholder"
+                raise ValueError(f"RAG: {_KEY_ENV} not set in .env for provider '{_PROVIDER}'")
         llm = ChatOpenAI(model=_MODEL, api_key=api_key, base_url=_BASE_URL)
 
     return (

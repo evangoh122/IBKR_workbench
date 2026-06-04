@@ -98,11 +98,9 @@ from etl.extract_edgar import run_edgar_filings_etl, run_edgar_facts_etl
 from etl.embed_edgar import run_embed_edgar_etl
 from etl.extract_cot import run_cot_etl
 
+from etl.utils import utcnow as _utcnow
+
 # ── ETL helpers ───────────────────────────────────────────────────────────────
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
 
 def _log_run(conn, run_type: str, status: str,
              message: str, rows: int, started: str):
@@ -300,7 +298,7 @@ def main():
         "embed-edgar":          job_embed_edgar,
         "edgar-filings":        job_edgar_filings,
         "edgar-facts":          job_edgar_facts,
-        "cot":             job_cot,
+        "cot":                  job_cot,
     }
     if args.job in polygon_only_jobs:
         fn = polygon_only_jobs[args.job]
@@ -334,24 +332,23 @@ def main():
     }
     fn = dispatch[args.job]
 
-    if not args.schedule:
-        fn()
-    else:
-        logger.info(f"Scheduled mode: running every {POLL_SECS}s (Ctrl-C to stop)")
-        fn()   # run immediately on start
-        schedule.every(POLL_SECS).seconds.do(fn)
-        # Re-fetch chain once per day
-        schedule.every().day.at("09:00").do(lambda: job_chain(client))
-        try:
-            while True:
-                schedule.run_pending()
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("Stopped by user")
-        finally:
-            client.disconnect_and_stop()
-
-    client.disconnect_and_stop()
+    try:
+        if not args.schedule:
+            fn()
+        else:
+            logger.info(f"Scheduled mode: running every {POLL_SECS}s (Ctrl-C to stop)")
+            fn()   # run immediately on start
+            schedule.every(POLL_SECS).seconds.do(fn)
+            # Re-fetch chain once per day
+            schedule.every().day.at("09:00").do(lambda: job_chain(client))
+            try:
+                while True:
+                    schedule.run_pending()
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("Stopped by user")
+    finally:
+        client.disconnect_and_stop()
 
 
 if __name__ == "__main__":

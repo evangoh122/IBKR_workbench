@@ -4,12 +4,12 @@ Generates text embeddings for ticker descriptions and stores them in DuckDB.
 
 Current source: polygon_tickers.description
 """
-from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List
 
 from loguru import logger
 
 from db.database import get_connection
+from etl.utils import utcnow as _utcnow
 
 _model = None   # lazy-loaded SentenceTransformer
 EMBEDDING_DIM = 384
@@ -66,9 +66,3 @@ def run_embed_tickers_etl(batch_size: int = 64) -> int:
 
     logger.info(f"Embedding ETL complete: {total} tickers")
     return total
-
-
-# ── Helper ────────────────────────────────────────────────────────────────────
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")

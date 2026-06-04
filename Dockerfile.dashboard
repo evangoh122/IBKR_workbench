@@ -14,7 +14,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source code (you can optimize this by only copying the dashboard folder and necessary modules)
 COPY . .
 
-RUN mkdir -p data logs
+RUN mkdir -p data logs && \
+    useradd --create-home appuser && \
+    chown -R appuser:appuser /app
+
+USER appuser
 
 EXPOSE 8501
 

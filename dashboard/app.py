@@ -139,8 +139,7 @@ if page == "💬 Chat":
         st.session_state.chat_results = []   # list of result dicts (parallel to user turns)
 
     # Check API key
-    import os as _os
-    if not _os.getenv("DEEPSEEK_API_KEY") and not _os.getenv("OPENAI_API_KEY") and not _os.getenv("ANTHROPIC_API_KEY") and _os.getenv("CHAT_PROVIDER", "ollama") != "ollama":
+    if not os.getenv("DEEPSEEK_API_KEY") and not os.getenv("OPENAI_API_KEY") and not os.getenv("ANTHROPIC_API_KEY") and os.getenv("CHAT_PROVIDER", "ollama") != "ollama":
         st.warning("⚠️  API key not set in .env for your chosen provider.")
         st.stop()
 
@@ -887,7 +886,7 @@ elif page == "🩺 ETL Health":
             except Exception:
                 return ""
         st.dataframe(
-            freshness.style.applymap(color_freshness, subset=["hours_ago"]),
+            freshness.style.map(color_freshness, subset=["hours_ago"]),
             use_container_width=True, hide_index=True,
         )
 
@@ -937,9 +936,8 @@ elif page == "ℹ️ About":
 
         st.markdown("")
         st.markdown("**AI Provider**")
-        import os as _os
-        provider = _os.getenv("CHAT_PROVIDER", "deepseek").title()
-        model    = _os.getenv("CHAT_MODEL", "")
+        provider = os.getenv("CHAT_PROVIDER", "deepseek").title()
+        model    = os.getenv("CHAT_MODEL", "")
         st.markdown(f"🤖 **{provider}** {f'— `{model}`' if model else ''}")
 
     st.markdown("---")
