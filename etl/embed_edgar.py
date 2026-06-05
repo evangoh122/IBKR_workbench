@@ -15,7 +15,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sec_edgar_downloader import Downloader
 
 from db.database import get_connection
-from etl.embed_tickers import _get_model
+from etl.embed_tickers import _get_embeddings as _get_model
 
 # SEC requires a user-agent
 _EMAIL = "research@example.com"
