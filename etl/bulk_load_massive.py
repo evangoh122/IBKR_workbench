@@ -7,10 +7,7 @@ Usage:
     python -m etl.bulk_load_massive --start 2021 --end 2026 --skip-download
 """
 import argparse
-import gzip
-import csv
 import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -35,11 +32,6 @@ TICKERS = {
 }
 
 
-def _ns_to_iso(ns: int) -> str:
-    """Convert nanosecond timestamp to ISO-8601 UTC string."""
-    return datetime.fromtimestamp(ns / 1_000_000_000, tz=timezone.utc).isoformat(timespec="seconds")
-
-
 def download_year(year: int):
     """Sync all daily files for a given year from S3."""
     dest = DOWNLOAD_DIR / str(year)
@@ -53,39 +45,69 @@ def download_year(year: int):
     ])
 
 
-def load_file(path: Path, conn) -> int:
-    """Load rows for selected tickers from a .csv.gz file. Returns rows inserted."""
-    rows = 0
-    with gzip.open(path, "rt") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row["ticker"] not in TICKERS:
-                continue
-            try:
-                ts = _ns_to_iso(int(row["window_start"]))
-                conn.execute("""
-                    INSERT OR IGNORE INTO polygon_bars
-                        (ticker, ts, timespan, open, high, low, close, volume, transactions)
-                    VALUES (?, ?, 'minute', ?, ?, ?, ?, ?, ?)
-                """, (
-                    row["ticker"], ts,
-                    float(row["open"]),
-                    float(row["high"]),
-                    float(row["low"]),
-                    float(row["close"]),
-                    float(row["volume"]),
-                    int(row["transactions"]) if row["transactions"] else None,
-                ))
-                rows += 1
-            except Exception as e:
-                logger.warning(f"Skipping row in {path.name}: {e}")
-    conn.commit()
-    return rows
+def load_all(start: int, end: int):
+    """
+    Load all .csv.gz files using DuckDB's native reader.
+    Filters to TICKERS in-database — much faster than row-by-row Python.
+    window_start is nanoseconds; convert to ISO-8601 via epoch_ms(ns/1e6).
+    """
+    # Build glob pattern covering all years in range
+    year_dirs = [str(DOWNLOAD_DIR / str(y)) for y in range(start, end + 1)]
+    # DuckDB glob needs forward slashes
+    globs = [d.replace("\\", "/") + "/**/*.csv.gz" for d in year_dirs]
+    glob_expr = "', '".join(globs)
+
+    ticker_list = ", ".join(f"'{t}'" for t in sorted(TICKERS))
+
+    logger.info(f"Loading {start}–{end} via DuckDB native reader, filtering to {len(TICKERS)} tickers")
+
+    with get_connection() as conn:
+        conn.execute(f"""
+            INSERT OR IGNORE INTO polygon_bars
+                (ticker, ts, timespan, open, high, low, close, volume, transactions)
+            SELECT
+                ticker,
+                strftime(
+                    epoch_ms(CAST(window_start AS BIGINT) / 1000000),
+                    '%Y-%m-%dT%H:%M:%S+00:00'
+                ) AS ts,
+                'minute'        AS timespan,
+                CAST(open         AS DOUBLE),
+                CAST(high         AS DOUBLE),
+                CAST(low          AS DOUBLE),
+                CAST(close        AS DOUBLE),
+                CAST(volume       AS DOUBLE),
+                TRY_CAST(transactions AS INTEGER)
+            FROM read_csv(
+                ['{glob_expr}'],
+                compression = 'gzip',
+                header      = true,
+                columns     = {{
+                    'ticker':       'VARCHAR',
+                    'volume':       'VARCHAR',
+                    'open':         'VARCHAR',
+                    'close':        'VARCHAR',
+                    'high':         'VARCHAR',
+                    'low':          'VARCHAR',
+                    'window_start': 'VARCHAR',
+                    'transactions': 'VARCHAR'
+                }}
+            )
+            WHERE ticker IN ({ticker_list})
+        """)
+        conn.commit()
+
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM polygon_bars WHERE ticker IN ({ticker_list})"
+        ).fetchone()[0]
+
+    logger.info(f"Done. {total:,} rows in polygon_bars for {len(TICKERS)} tickers")
+    return total
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--start", type=int, default=2021)
+    parser.add_argument("--start", type=int, default=2022)
     parser.add_argument("--end",   type=int, default=2026)
     parser.add_argument("--skip-download", action="store_true",
                         help="Skip S3 sync, only load already-downloaded files")
@@ -93,25 +115,11 @@ def main():
 
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    # ── Download ──────────────────────────────────────────────────
     if not args.skip_download:
         for year in range(args.start, args.end + 1):
             download_year(year)
 
-    # ── Load ──────────────────────────────────────────────────────
-    files = sorted(f for f in DOWNLOAD_DIR.rglob("*.csv.gz")
-                   if args.start <= int(f.parent.parent.name) <= args.end)
-
-    logger.info(f"Loading {len(files)} files — filtering to {len(TICKERS)} tickers")
-    total = 0
-    with get_connection() as conn:
-        for i, path in enumerate(files, 1):
-            rows = load_file(path, conn)
-            total += rows
-            if i % 50 == 0 or i == len(files):
-                logger.info(f"Progress: {i}/{len(files)} files — {total:,} rows inserted")
-
-    logger.info(f"Done. {total:,} rows inserted across {len(TICKERS)} tickers")
+    load_all(args.start, args.end)
 
 
 if __name__ == "__main__":
