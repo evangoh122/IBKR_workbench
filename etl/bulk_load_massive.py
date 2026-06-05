@@ -16,6 +16,8 @@ from pathlib import Path
 from loguru import logger
 from db.database import get_connection
 
+logger.add("logs/etl_{time:YYYY-MM-DD}.log", rotation="1 day", retention="14 days", level="DEBUG")
+
 S3_ENDPOINT  = "https://files.massive.com"
 S3_BUCKET    = "s3://flatfiles/us_stocks_sip/minute_aggs_v1"
 AWS_PROFILE  = "massive"
