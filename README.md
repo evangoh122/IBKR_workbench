@@ -144,6 +144,11 @@ python main.py --job polygon-quotes       # delayed stock snapshots (bid/ask/las
 python main.py --job polygon-options      # options chain snapshots + Greeks
 python main.py --job polygon-option-bars  # historical OHLCV bars per options contract
 python main.py --job polygon              # all polygon jobs
+python main.py --job polygon-daily-flat   # Polygon day_aggs_v1 S3 flat-file load (additive — minute loader untouched)
+
+# ── yfinance (no API key needed — staging area) ──────────────────────────────
+python main.py --job yf-bars              # daily bars for 32 semi/Mag7 tickers → staging_yf_bars
+python main.py --job yf-indices           # daily bars + stats for 18 major indices → staging_yf_indices(+stats)
 
 # ── SEC EDGAR (no API key needed) ─────────────────────────────────────────────
 python main.py --job edgar-filings        # 10-K / 10-Q / 8-K filing history
@@ -244,6 +249,9 @@ All data in `data/ibkr.duckdb` (14 tables):
 | `edgar_filings` | varies | 10-K / 10-Q / 8-K filing history |
 | `edgar_facts` | varies | XBRL facts — revenue, EPS, assets, equity |
 | `cot_reports` | weekly | CFTC Commitments of Traders (Legacy Futures Only) |
+| `staging_yf_bars` | ~5,000/ticker | yfinance daily OHLC+adj for the 32 validation tickers — for cross-checking polygon_bars |
+| `staging_yf_indices` | ~6,500/index | yfinance daily bars for 18 major indices (incl. 2 derived spreads) |
+| `staging_yf_index_stats` | same as indices | Returns/vol/drawdown + 1σ–4σ bands per index per day, rebuilt each run |
 | `ticker_embeddings` | ~11k | 384-dim sentence embeddings (HNSW) |
 | `edgar_embeddings` | optional | EDGAR filing text embeddings |
 | `etl_runs` | grows | Audit log of every ETL job |

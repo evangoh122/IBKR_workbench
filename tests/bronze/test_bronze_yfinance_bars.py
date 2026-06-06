@@ -2,9 +2,6 @@
 tests/bronze/test_bronze_yfinance_bars.py
 Bronze layer: yfinance daily bars ingestion into staging_yf_bars.
 """
-from unittest.mock import patch, MagicMock
-import pandas as pd
-
 from db.database import get_connection
 
 
@@ -19,6 +16,10 @@ def test_staging_tables_exist(tmp_db):
     assert "staging_yf_bars" in tables
     assert "staging_yf_indices" in tables
     assert "staging_yf_index_stats" in tables
+
+
+from unittest.mock import patch, MagicMock
+import pandas as pd
 
 
 def _fake_history_df():
@@ -57,7 +58,7 @@ def test_yf_bars_writes_rows(tmp_db):
             "FROM staging_yf_bars ORDER BY ts"
         ).fetchall()
     assert rows[0] == ("NVDA", "2024-01-02", 100.0, 102.0, 101.5, 1_000_000.0, 0.0)
-    assert rows[2][6] == 0.25
+    assert rows[2][6] == 0.25  # dividend on row 3
 
 
 def test_yf_bars_idempotent(tmp_db):
