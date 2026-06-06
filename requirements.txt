@@ -17,6 +17,7 @@ lxml>=5.2.0,<6
 sec-edgar-downloader>=3.0.0,<6
 
 pandas>=2.2.0,<3
+yfinance>=0.2.40,<1
 schedule>=1.2.0,<2
 python-dotenv>=1.0.0,<2
 loguru>=0.7.0,<1

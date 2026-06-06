@@ -303,6 +303,83 @@ def init_db():
                 ON cot_reports(market_name, report_date)
         """)
 
+        # ── Staging: yfinance daily bars (validation feed) ────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS staging_yf_bars (
+                ticker      TEXT NOT NULL,
+                ts          TEXT NOT NULL,
+                open        REAL,
+                high        REAL,
+                low         REAL,
+                close       REAL,
+                adj_close   REAL,
+                volume      REAL,
+                dividends   REAL,
+                splits      REAL,
+                created_at  TIMESTAMP DEFAULT now(),
+                UNIQUE(ticker, ts)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_syfb_ticker_ts
+                ON staging_yf_bars(ticker, ts)
+        """)
+
+        # ── Staging: yfinance major indices ──────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS staging_yf_indices (
+                symbol      TEXT NOT NULL,
+                ts          TEXT NOT NULL,
+                open        REAL,
+                high        REAL,
+                low         REAL,
+                close       REAL,
+                adj_close   REAL,
+                volume      REAL,
+                created_at  TIMESTAMP DEFAULT now(),
+                UNIQUE(symbol, ts)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_syfi_symbol_ts
+                ON staging_yf_indices(symbol, ts)
+        """)
+
+        # ── Staging: yfinance index statistics (recomputed every run) ────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS staging_yf_index_stats (
+                symbol               TEXT NOT NULL,
+                ts                   TEXT NOT NULL,
+                ret_1d               REAL,
+                ret_21d              REAL,
+                ret_252d             REAL,
+                vol_21d              REAL,
+                vol_63d              REAL,
+                vol_252d             REAL,
+                drawdown             REAL,
+                max_drawdown_to_date REAL,
+                sharpe_252d          REAL,
+                skew_252d            REAL,
+                kurt_252d            REAL,
+                mean_252d            REAL,
+                sigma_252d           REAL,
+                band_plus_1          REAL,
+                band_minus_1         REAL,
+                band_plus_2          REAL,
+                band_minus_2         REAL,
+                band_plus_3          REAL,
+                band_minus_3         REAL,
+                band_plus_4          REAL,
+                band_minus_4         REAL,
+                created_at           TIMESTAMP DEFAULT now(),
+                UNIQUE(symbol, ts)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_syfis_symbol_ts
+                ON staging_yf_index_stats(symbol, ts)
+        """)
+
         # ── EDGAR: 13-F institutional holdings ───────────────────────────────────
         conn.execute("""
             CREATE TABLE IF NOT EXISTS edgar_13f (

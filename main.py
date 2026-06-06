@@ -14,6 +14,9 @@ Usage:
     python main.py --job polygon-ref     # polygon ticker reference only
     python main.py --job polygon-ticks   # polygon trade ticks only (requires START_DATE/END_DATE)
     python main.py --job polygon-semis   # day bars + ticks for group-filtered tickers
+    python main.py --job yf-bars             # yfinance daily bars for the 32 semi/Mag7 tickers (staging)
+    python main.py --job yf-indices          # yfinance bars + stats for 18 major indices (staging)
+    python main.py --job polygon-daily-flat  # Polygon S3 day_aggs_v1 flat-file load
     python main.py --job embed-tickers   # embed polygon descriptions → DuckDB vector store
     python main.py --job edgar-filings   # EDGAR filing history (10-K, 10-Q, 8-K)
     python main.py --job edgar-facts     # EDGAR XBRL financial facts
@@ -121,6 +124,8 @@ from etl.embed_tickers import run_embed_tickers_etl
 from etl.extract_edgar import run_edgar_filings_etl, run_edgar_facts_etl, run_edgar_13f_etl
 from etl.embed_edgar import run_embed_edgar_etl
 from etl.extract_cot import run_cot_etl
+from etl.extract_yfinance import run_yf_bars_etl, run_yf_indices_etl
+from etl import bulk_load_daily
 
 from etl.utils import utcnow as _utcnow
 
@@ -299,6 +304,23 @@ def job_cot():
     return run_cot_etl()
 
 
+@etl_job("yf-bars")
+def job_yf_bars():
+    return run_yf_bars_etl()
+
+
+@etl_job("yf-indices")
+def job_yf_indices():
+    return run_yf_indices_etl()
+
+
+@etl_job("polygon-daily-flat")
+def job_polygon_daily_flat():
+    start_y = int(POLYGON_START_DATE[:4]) if POLYGON_START_DATE else 2021
+    end_y   = int(POLYGON_END_DATE[:4])   if POLYGON_END_DATE   else 2026
+    return bulk_load_daily.run(start_year=start_y, end_year=end_y)
+
+
 def run_all(client: IBKRClient, refresh_chain: bool = False):
     if refresh_chain:
         logger.info("── Phase 1: Refreshing option chains ──")
@@ -326,6 +348,7 @@ def main():
                             "polygon-ticks", "polygon-semis",
                             "embed-tickers", "embed-edgar",
                             "edgar-filings", "edgar-facts", "edgar-13f", "cot",
+                            "yf-bars", "yf-indices", "polygon-daily-flat",
                         ],
                         default="all")
     parser.add_argument("--schedule", action="store_true",
@@ -353,6 +376,9 @@ def main():
         "edgar-facts":          job_edgar_facts,
         "edgar-13f":            job_edgar_13f,
         "cot":                  job_cot,
+        "yf-bars":              job_yf_bars,
+        "yf-indices":           job_yf_indices,
+        "polygon-daily-flat":   job_polygon_daily_flat,
     }
     if args.job in polygon_only_jobs:
         fn = polygon_only_jobs[args.job]
