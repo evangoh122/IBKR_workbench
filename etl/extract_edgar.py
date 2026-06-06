@@ -190,6 +190,149 @@ def run_edgar_facts_etl(tickers) -> int:
     return total
 
 
+# ── 13-F Institutional Holdings ──────────────────────────────────────────────
+
+_EFTS_SEARCH = "https://efts.sec.gov/LATEST/search-index"
+
+
+def run_edgar_13f_etl(tickers, lookback_quarters: int = 8) -> int:
+    """
+    Fetch 13-F-HR institutional holdings for each ticker.
+    Uses EDGAR EFTS full-text search to find all institutional filers
+    that held the stock, then parses the InfoTable XML for share counts.
+    lookback_quarters: how many recent quarters to fetch (default 8 = 2 years).
+    """
+    from datetime import date, timedelta
+
+    symbols = [_symbol(t) for t in _stk_only(tickers)]
+    cik_map = _build_cik_map(symbols)
+    total   = 0
+
+    # Date cutoff
+    cutoff = (date.today() - timedelta(days=lookback_quarters * 92)).isoformat()
+
+    with get_connection() as conn:
+        for ticker in symbols:
+            cik = cik_map.get(ticker.upper())
+            if not cik:
+                continue
+
+            # Search EFTS for 13-F-HR filings mentioning this ticker's CIK
+            results = _get(f"{_EFTS_SEARCH}?q=%22{cik}%22&forms=13F-HR&dateRange=custom&startdt={cutoff}&hits.hits._source=period_of_report,entity_name,file_date,accession_no")
+            if not results:
+                time.sleep(_DELAY)
+                continue
+
+            hits = results.get("hits", {}).get("hits", [])
+            rows_written = 0
+
+            for hit in hits:
+                src            = hit.get("_source", {})
+                filer_name     = src.get("entity_name", "")
+                filed_date     = src.get("file_date", "")
+                period         = src.get("period_of_report", "")
+                accession      = src.get("accession_no", "").replace("-", "")
+                filer_cik_raw  = hit.get("_id", "").split(":")[0] if ":" in hit.get("_id", "") else ""
+
+                if not accession or not period:
+                    continue
+
+                # Try to get holdings detail from the filing index
+                shares, value, discretion, put_call = None, None, None, None
+                infotable_url = _find_infotable_url(accession, filer_cik_raw or accession[:10])
+                if infotable_url:
+                    xml_data = _get_raw(infotable_url)
+                    if xml_data:
+                        shares, value, discretion, put_call = _parse_infotable(xml_data)
+
+                try:
+                    conn.execute("""
+                        INSERT OR IGNORE INTO edgar_13f
+                            (filer_cik, filer_name, ticker, period_of_report,
+                             filed_date, accession_number, shares, value,
+                             investment_discretion, put_call)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        filer_cik_raw, filer_name, ticker, period,
+                        filed_date, accession, shares, value, discretion, put_call,
+                    ))
+                    rows_written += 1
+                except Exception as e:
+                    logger.debug(f"13-F insert skip {ticker}/{filer_name}: {e}")
+
+            conn.commit()
+            total += rows_written
+            logger.debug(f"EDGAR 13-F {ticker}: {rows_written} institutional holders stored")
+            time.sleep(_DELAY)
+
+    logger.info(f"EDGAR 13-F ETL complete: {total} holdings across {len(symbols)} tickers")
+    return total
+
+
+def _quarter(date_str: str) -> str:
+    month = int(date_str[5:7])
+    return str((month - 1) // 3 + 1)
+
+
+def _find_infotable_url(accession: str, filer_cik: str) -> Optional[str]:
+    """Look up the InfoTable document URL from the filing index."""
+    cik_padded = filer_cik.zfill(10)
+    data = _get(f"https://data.sec.gov/submissions/CIK{cik_padded}.json")
+    if not data:
+        return None
+    # Find the InfoTable document in recent filings
+    recent = data.get("filings", {}).get("recent", {})
+    accessions = recent.get("accessionNumber", [])
+    docs       = recent.get("primaryDocument", [])
+    for acc, doc in zip(accessions, docs):
+        if acc.replace("-", "") == accession:
+            return f"https://www.sec.gov/Archives/edgar/data/{int(cik_padded)}/{accession}/{doc}"
+    return None
+
+
+def _get_raw(url: str) -> Optional[str]:
+    """Fetch raw text content (for XML parsing)."""
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=15)
+        resp.raise_for_status()
+        return resp.text
+    except Exception:
+        return None
+
+
+def _parse_infotable(xml_text: str) -> tuple:
+    """Parse 13-F InfoTable XML, return (shares, value_thousands, discretion, put_call)."""
+    import xml.etree.ElementTree as ET
+    try:
+        # Strip namespaces for simpler parsing
+        xml_clean = xml_text
+        for ns in ["ns1:", "ns2:", "com:", "n1:", "n2:"]:
+            xml_clean = xml_clean.replace(ns, "")
+        root = ET.fromstring(xml_clean)
+
+        total_shares = 0
+        total_value  = 0
+        discretion   = None
+        put_call     = None
+
+        for entry in root.iter("infoTable"):
+            try:
+                sh  = int(entry.findtext("sshPrnamt") or 0)
+                val = int(entry.findtext("value") or 0)
+                total_shares += sh
+                total_value  += val
+                if not discretion:
+                    discretion = entry.findtext("investmentDiscretion")
+                if not put_call:
+                    put_call = entry.findtext("putCall")
+            except (ValueError, TypeError):
+                continue
+
+        return (total_shares or None, total_value or None, discretion, put_call)
+    except Exception:
+        return (None, None, None, None)
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 _cik_cache: Optional[Dict[str, str]] = None   # ticker.upper() → zero-padded CIK

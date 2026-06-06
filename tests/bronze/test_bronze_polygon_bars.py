@@ -112,9 +112,9 @@ def test_polygon_bars_handles_null_fields(tmp_db):
     with get_connection() as conn:
         row = conn.execute("SELECT * FROM polygon_bars").fetchone()
         assert row[0] == "TEST"
-        assert row[4] == 100.0  # open
-        assert row[5] is None   # high is NULL
-        assert row[6] == 95.0   # low
+        assert row[3] == 100.0  # open
+        assert row[4] is None   # high is NULL
+        assert row[5] == 95.0   # low
 
 
 def test_polygon_bars_multiple_tickers(tmp_db, mock_aggs):

@@ -55,9 +55,10 @@ LOG_LEVEL     = os.getenv("LOG_LEVEL", "INFO")
 EXPIRY_CYCLES = int(os.getenv("OPTIONS_EXPIRY_CYCLES", "2"))
 
 POLYGON_TIMESPAN              = os.getenv("POLYGON_BARS_TIMESPAN", "day")
+POLYGON_OPT_TIMESPAN          = os.getenv("POLYGON_OPTION_BARS_TIMESPAN", "day")      # always day for options
 POLYGON_LOOKBACK              = int(os.getenv("POLYGON_BARS_LOOKBACK", "1825"))       # 5 years — bars only
 POLYGON_OPT_LOOKBACK          = int(os.getenv("POLYGON_OPTION_BARS_LOOKBACK", "730")) # 2 years — options only
-POLYGON_OPT_MAX_CONTRACTS     = int(os.getenv("POLYGON_OPTION_BARS_MAX_CONTRACTS", "1000"))
+POLYGON_OPT_MAX_CONTRACTS     = int(os.getenv("POLYGON_OPTION_BARS_MAX_CONTRACTS", "100"))  # reduced from 1000
 POLYGON_OPTIONS_MAX_CONTRACTS = int(os.getenv("POLYGON_OPTIONS_MAX_CONTRACTS", "2000"))
 POLYGON_START_DATE            = os.getenv("START_DATE", "") or None
 POLYGON_END_DATE              = os.getenv("END_DATE",   "") or None
@@ -117,7 +118,7 @@ from etl.extract_polygon import (
 )
 from etl.extract_polygon_ticks import run_polygon_ticks_etl
 from etl.embed_tickers import run_embed_tickers_etl
-from etl.extract_edgar import run_edgar_filings_etl, run_edgar_facts_etl
+from etl.extract_edgar import run_edgar_filings_etl, run_edgar_facts_etl, run_edgar_13f_etl
 from etl.embed_edgar import run_embed_edgar_etl
 from etl.extract_cot import run_cot_etl
 
@@ -210,7 +211,7 @@ def job_polygon_option_bars():
     poly = _polygon_client_or_exit()
     return run_polygon_option_bars_etl(
         poly, POLYGON_TICKERS,
-        timespan=POLYGON_TIMESPAN,
+        timespan=POLYGON_OPT_TIMESPAN,
         lookback_days=POLYGON_OPT_LOOKBACK,
         max_contracts=POLYGON_OPT_MAX_CONTRACTS,
     )
@@ -283,6 +284,11 @@ def job_edgar_facts():
     return run_edgar_facts_etl(TICKERS)
 
 
+@etl_job("edgar-13f")
+def job_edgar_13f():
+    return run_edgar_13f_etl(TICKERS)
+
+
 @etl_job("embed-edgar")
 def job_embed_edgar():
     return run_embed_edgar_etl(TICKER_SYMBOLS)
@@ -319,7 +325,7 @@ def main():
                             "polygon-options", "polygon-option-bars", "polygon-ref",
                             "polygon-ticks", "polygon-semis",
                             "embed-tickers", "embed-edgar",
-                            "edgar-filings", "edgar-facts", "cot",
+                            "edgar-filings", "edgar-facts", "edgar-13f", "cot",
                         ],
                         default="all")
     parser.add_argument("--schedule", action="store_true",
@@ -345,6 +351,7 @@ def main():
         "embed-edgar":          job_embed_edgar,
         "edgar-filings":        job_edgar_filings,
         "edgar-facts":          job_edgar_facts,
+        "edgar-13f":            job_edgar_13f,
         "cot":                  job_cot,
     }
     if args.job in polygon_only_jobs:

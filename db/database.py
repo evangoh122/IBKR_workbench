@@ -303,6 +303,28 @@ def init_db():
                 ON cot_reports(market_name, report_date)
         """)
 
+        # ── EDGAR: 13-F institutional holdings ───────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS edgar_13f (
+                filer_cik       TEXT    NOT NULL,
+                filer_name      TEXT,
+                ticker          TEXT    NOT NULL,   -- holding we care about
+                period_of_report TEXT  NOT NULL,   -- YYYY-MM-DD quarter end
+                filed_date      TEXT,
+                accession_number TEXT  NOT NULL,
+                shares          INTEGER,            -- shares held
+                value           INTEGER,            -- market value in $thousands
+                investment_discretion TEXT,         -- SOLE | SHARED | OTHER
+                put_call        TEXT,               -- PUT | CALL | NULL
+                created_at      TIMESTAMP DEFAULT now(),
+                UNIQUE(filer_cik, ticker, period_of_report, accession_number)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_13f_ticker_period
+                ON edgar_13f(ticker, period_of_report)
+        """)
+
         # ── Vector Storage ────────────────────────────────────────────────────────
         conn.execute("""
             CREATE TABLE IF NOT EXISTS ticker_embeddings (

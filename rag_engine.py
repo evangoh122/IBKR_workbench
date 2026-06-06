@@ -24,11 +24,11 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
-from etl.embed_tickers import _get_model
+from etl.embed_tickers import _get_embeddings
 from etl.chat_engine import _BASE_URL, _MODEL, _KEY_ENV
 
 DB_PATH = os.getenv("DB_PATH", "./data/ibkr.duckdb")
-EMBEDDING_DIM = 384
+EMBEDDING_DIM = 768
 
 
 # ── Retrievers ────────────────────────────────────────────────────────────────
@@ -53,10 +53,9 @@ class DuckDBVectorRetriever(BaseRetriever):
                 ).fetchone()[0]
 
                 if count > 0:
-                    model = _get_model()
-                    qvec  = model.encode(
-                        [query], normalize_embeddings=True, show_progress_bar=False
-                    )[0].tolist()
+                    embeddings = _get_embeddings()
+                    # Gemini embedding for the query
+                    qvec = embeddings.embed_query(query)
 
                     rows = conn.execute(f"""
                         SELECT ticker, text,
@@ -207,8 +206,8 @@ class EDGAREmbeddingsRetriever(BaseRetriever):
                 if count == 0:
                     return []
 
-                model = _get_model()
-                qvec  = model.encode([query], normalize_embeddings=True, show_progress_bar=False)[0].tolist()
+                embeddings = _get_embeddings()
+                qvec = embeddings.embed_query(query)
 
                 rows = conn.execute(f"""
                     SELECT ticker, text, accession,
