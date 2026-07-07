@@ -1,6 +1,6 @@
 """
 db/database.py
-DuckDB schema + connection manager for IBKR ETL.
+DuckDB schema + connection manager for Equity Workbench ETL.
 """
 import duckdb
 import os
@@ -8,7 +8,7 @@ from pathlib import Path
 from loguru import logger
 
 
-DB_PATH = os.getenv("DB_PATH", "./data/ibkr.duckdb")
+DB_PATH = os.getenv("DB_PATH", "./data/equity.duckdb")
 
 
 def get_connection() -> duckdb.DuckDBPyConnection:
@@ -100,7 +100,7 @@ def init_db():
             CREATE SEQUENCE IF NOT EXISTS etl_runs_id_seq;
             CREATE TABLE IF NOT EXISTS etl_runs (
                 id          INTEGER PRIMARY KEY DEFAULT nextval('etl_runs_id_seq'),
-                run_type    TEXT    NOT NULL,   -- 'stocks' | 'options' | 'chain'
+                run_type    TEXT    NOT NULL,   -- 'stocks' | 'options' | 'chain' | 'polygon_bars_bronze' | ...
                 status      TEXT    NOT NULL,   -- 'ok' | 'error'
                 message     TEXT,
                 rows_written INTEGER DEFAULT 0,
@@ -441,6 +441,105 @@ def init_db():
             """)
         except Exception as e:
             logger.warning(f"Failed to create HNSW index on edgar_embeddings: {e}")
+
+        # ══ SILVER LAYER ═══════════════════════════════════════════════════════
+        # Derived, recomputable feature tables built from bronze bars.
+        # Grain: one row per entity per trading day. Rebuilt with INSERT OR REPLACE.
+
+        # ── Silver: per-stock daily technical features ─────────────────────────
+        # Source: polygon_bars WHERE timespan='day'. Windows are trailing N days.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS silver_stock_features (
+                ticker        TEXT    NOT NULL,
+                ts            TEXT    NOT NULL,   -- trading day, ISO-8601 (bronze join key)
+                trade_date    DATE,              -- typed date for window ordering
+                close         DOUBLE,            -- from bronze polygon_bars (day)
+                volume        DOUBLE,
+                daily_return  DOUBLE,            -- close / prev_close - 1
+                -- simple moving averages of close
+                ma_20         DOUBLE,
+                ma_50         DOUBLE,
+                ma_100        DOUBLE,
+                -- rolling sample standard deviation of close
+                std_20        DOUBLE,
+                std_50        DOUBLE,
+                std_100       DOUBLE,
+                -- price z-score = (close - ma_N) / std_N
+                zscore_20     DOUBLE,
+                zscore_50     DOUBLE,
+                zscore_100    DOUBLE,
+                -- rolling VWAP = sum(typical_price*volume)/sum(volume), typical=(h+l+c)/3
+                vwap_20       DOUBLE,
+                vwap_50       DOUBLE,
+                vwap_100      DOUBLE,
+                computed_at   TIMESTAMP DEFAULT now(),
+                UNIQUE(ticker, ts)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ssf_ticker_date
+                ON silver_stock_features(ticker, trade_date)
+        """)
+
+        # ── Silver: per-contract daily option greeks (Black-Scholes-Merton) ────
+        # Source: polygon_option_bars (option price) JOIN polygon_bars (underlying
+        # close). implied_vol solved from the option's market close; greeks analytic.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS silver_option_greeks (
+                option_ticker   TEXT    NOT NULL,   -- OPRA symbol
+                underlying      TEXT    NOT NULL,
+                expiry          TEXT,               -- YYYY-MM-DD
+                strike          DOUBLE,
+                "right"         TEXT,               -- 'call' | 'put'
+                ts              TEXT    NOT NULL,   -- trading day, ISO-8601
+                trade_date      DATE,
+                option_close    DOUBLE,             -- option price from bronze bar
+                und_close       DOUBLE,             -- underlying close (S)
+                time_to_expiry  DOUBLE,             -- years to expiry (ACT/365)
+                moneyness       DOUBLE,             -- und_close / strike
+                risk_free_rate  DOUBLE,             -- r assumption used
+                dividend_yield  DOUBLE,             -- q assumption used (default 0)
+                implied_vol     DOUBLE,             -- sigma solved from option_close
+                delta           DOUBLE,
+                gamma           DOUBLE,
+                theta           DOUBLE,             -- per calendar day
+                vega            DOUBLE,             -- per 1 vol point
+                rho             DOUBLE,
+                computed_at     TIMESTAMP DEFAULT now(),
+                UNIQUE(option_ticker, ts)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sog_underlying_date
+                ON silver_option_greeks(underlying, trade_date)
+        """)
+
+        # ── Silver: per-underlying daily options POSITIONING ───────────────────
+        # Aggregated from polygon_option_bars (volume) + silver_option_greeks
+        # (implied_vol, delta). OI-based metrics (GEX/DEX, OI walls) are deferred
+        # until a historical OI feed (CBOE Optsum / ORATS) is wired in.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS silver_option_positioning (
+                underlying      TEXT    NOT NULL,
+                ts              TEXT    NOT NULL,   -- trading day, ISO-8601
+                trade_date      DATE,
+                total_volume    DOUBLE,            -- all contracts
+                call_volume     DOUBLE,
+                put_volume      DOUBLE,
+                put_call_ratio  DOUBLE,            -- put_volume / call_volume
+                atm_iv          DOUBLE,            -- IV nearest moneyness = 1
+                call_iv_25d     DOUBLE,            -- avg IV of ~25-delta calls
+                put_iv_25d      DOUBLE,            -- avg IV of ~25-delta puts
+                iv_skew_25d     DOUBLE,            -- put_iv_25d - call_iv_25d
+                n_contracts     INTEGER,
+                computed_at     TIMESTAMP DEFAULT now(),
+                UNIQUE(underlying, ts)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sop_underlying_date
+                ON silver_option_positioning(underlying, trade_date)
+        """)
     finally:
         conn.close()
 
