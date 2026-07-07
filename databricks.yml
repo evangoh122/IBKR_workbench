@@ -1,0 +1,63 @@
+# This is a Declarative Automation Bundle definition for equity_workbench.
+# The Databricks extension requires databricks.yml configuration file.
+# See https://docs.databricks.com/dev-tools/bundles/index.html for documentation.
+
+bundle:
+  name: equity_workbench
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Resources: jobs for this bundle.
+# NOTE: this is a TEMPLATE. Adjust node_type_id / spark_version / num_workers to
+# your workspace's available cluster types before deploying. Schema follows the
+# Databricks Asset Bundle `resources.jobs.<job>` spec:
+#   https://docs.databricks.com/dev-tools/bundles/resources.html
+# ─────────────────────────────────────────────────────────────────────────────
+resources:
+  jobs:
+    bronze_ticks:
+      name: bronze_ticks
+      description: >-
+        Bronze-layer TICK (trade) loader for the semiconductor universe from
+        Polygon/Massive S3 flat files. Writes Delta stock_trades / option_trades
+        partitioned by trade_date.
+      tasks:
+        - task_key: bronze_ticks
+          spark_python_task:
+            python_file: ./databricks/bronze_ticks_spark.py
+            # Parameters are passed through to the script's argparse.
+            parameters:
+              - "--dataset"
+              - "both"
+              - "--start-year"
+              - "2021"
+              - "--end-year"
+              - "2026"
+              - "--output-root"
+              - "/Volumes/main/ibkr/bronze"
+          # Single-node job cluster is fine as a template; scale up num_workers
+          # for a full 5yr tick backfill. spark_version / node_type_id are
+          # placeholders — replace with values valid for your workspace/cloud.
+          new_cluster:
+            spark_version: 15.4.x-scala2.12
+            node_type_id: m5d.xlarge
+            num_workers: 2
+            data_security_mode: SINGLE_USER
+            spark_conf:
+              # Enable dynamic partition overwrite for idempotent Delta writes.
+              spark.sql.sources.partitionOverwriteMode: dynamic
+      # Polygon S3 creds should come from a Databricks secret scope named
+      # "polygon" (keys access_key_id / secret_access_key). The script falls
+      # back to env vars POLYGON_Access_KEY_ID / POLYGON_SECRET_ACCESS_KEY.
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-d57daa5e-6c71.cloud.databricks.com
+
+  ## Optionally, there could be 'staging' or 'prod' targets here.
+  #
+  # prod:
+  #   workspace:
+  #     host: https://dbc-d57daa5e-6c71.cloud.databricks.com

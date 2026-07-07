@@ -1,0 +1,45 @@
+# CodeRabbit configuration — https://docs.coderabbit.ai/getting-started/configure-coderabbit
+# CodeRabbit auto-reviews pull requests. This repo uses a Mimo(build) → DeepSeek(review)
+# → Claude(validate) flow; CodeRabbit adds an automated PR gate on top.
+language: en-US
+early_access: false
+
+reviews:
+  profile: chill               # 'chill' | 'assertive'
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+      - claude
+  path_filters:
+    - "!**/*.duckdb"
+    - "!**/*.parquet"
+    - "!**/*.csv.gz"
+    - "!data/**"
+    - "!**/.venv/**"
+    - "!logs/**"
+    - "!graphify-out/**"
+  path_instructions:
+    - path: "etl/**"
+      instructions: >-
+        This is the ETL layer (Polygon flat-file → DuckDB bronze → silver).
+        Flag: SQL injection in f-string queries, non-idempotent loads (bronze must
+        dedup), incorrect timestamp/timezone handling, and Black-Scholes-Merton
+        math errors in the option-greeks code.
+    - path: "db/**"
+      instructions: >-
+        DuckDB schema definitions. Flag schema/column mismatches with the INSERT
+        statements in etl/ and missing UNIQUE constraints on bronze tables.
+    - path: "tests/**"
+      instructions: >-
+        Pytest suite. Flag column-index assumptions that don't match the DuckDB
+        schema and tests that assert against mocks without exercising real logic.
+
+chat:
+  auto_reply: true

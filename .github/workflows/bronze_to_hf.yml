@@ -1,0 +1,108 @@
+name: Bronze → HuggingFace
+
+# Day-level incremental bronze load (DuckDB flat-file aggregates) then push the
+# per-table Parquet export to HuggingFace.
+#
+# NOTE: This CI does DAY-LEVEL aggregates ONLY. TICK-scale (trade) ingestion is
+# far too big for a GitHub runner's disk/time budget and belongs on Databricks —
+# see databricks/bronze_ticks_spark.py + the `bronze_ticks` job in databricks.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: "Dataset to load (stocks | options | both)"
+        default: "both"
+        type: choice
+        options: [stocks, options, both]
+  schedule:
+    # Weekly, Mondays 06:00 UTC.
+    - cron: "0 6 * * 1"
+
+# Never let two bronze loads run at once (they share the same HF repo).
+concurrency:
+  group: bronze-to-hf
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bronze-to-hf:
+    name: Day-level bronze load + HF push
+    runs-on: ubuntu-latest
+    env:
+      # Polygon / Massive S3 flat-file credentials (from GitHub Secrets).
+      POLYGON_Access_KEY_ID: ${{ secrets.POLYGON_ACCESS_KEY_ID }}
+      POLYGON_SECRET_ACCESS_KEY: ${{ secrets.POLYGON_SECRET_ACCESS_KEY }}
+      # HuggingFace write token for the dataset push.
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      # Loader shells out to the AWS CLI — on Linux it's on PATH as `aws`
+      # (etl/bulk_load_flatfiles.py reads AWS_CLI from the env).
+      AWS_CLI: aws
+      # Recent window: current year and the year prior (day-level incremental).
+      DATASET: ${{ github.event.inputs.dataset || 'both' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install AWS CLI v2
+        # The DuckDB loader shells out to `aws s3 sync` against the Massive
+        # endpoint using a profile named "massive".
+        run: |
+          curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+          unzip -q awscliv2.zip
+          sudo ./aws/install --update
+          aws --version
+
+      - name: Configure Massive S3 profile + .env
+        # etl/bulk_load_flatfiles.py syncs with `--profile massive` and reads
+        # POLYGON_* from the environment (via load_dotenv()).
+        run: |
+          aws configure set aws_access_key_id     "$POLYGON_Access_KEY_ID"     --profile massive
+          aws configure set aws_secret_access_key "$POLYGON_SECRET_ACCESS_KEY" --profile massive
+          aws configure set region us-east-1 --profile massive
+          {
+            echo "POLYGON_Access_KEY_ID=$POLYGON_Access_KEY_ID"
+            echo "POLYGON_SECRET_ACCESS_KEY=$POLYGON_SECRET_ACCESS_KEY"
+            echo "HF_TOKEN=$HF_TOKEN"
+          } >> .env
+
+      - name: Compute recent year window
+        id: window
+        # Load the current year and the one before it (day-level incremental).
+        run: |
+          CUR=$(date -u +%Y)
+          PREV=$((CUR - 1))
+          echo "start_year=$PREV" >> "$GITHUB_OUTPUT"
+          echo "end_year=$CUR"   >> "$GITHUB_OUTPUT"
+
+      - name: Day-level bronze load (DuckDB flat files)
+        run: |
+          python -m etl.bulk_load_flatfiles \
+            --dataset "$DATASET" \
+            --start-year ${{ steps.window.outputs.start_year }} \
+            --end-year   ${{ steps.window.outputs.end_year }}
+
+      - name: Export tables + push to HuggingFace
+        run: |
+          python -m etl.export_tables_hf --push --repo egoh33/semi-workbench-tables
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ASSUMPTIONS (build-only template):
+#   * GitHub Secrets POLYGON_ACCESS_KEY_ID, POLYGON_SECRET_ACCESS_KEY, HF_TOKEN
+#     exist in the repo settings.
+#   * etl/bulk_load_flatfiles.py reads AWS_CLI / AWS_PROFILE / S3_ENDPOINT from
+#     the environment; this workflow sets AWS_CLI=aws so the Linux runner uses
+#     the PATH `aws` binary (not the Windows exe default).
+#   * Only day-level aggregates are loaded; tick-scale trades run on Databricks.
+# ─────────────────────────────────────────────────────────────────────────────
