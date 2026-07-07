@@ -5,7 +5,7 @@ Retrieval-Augmented Generation using LangChain LCEL + DuckDB.
 Two retrieval sources:
   1. DuckDBVectorRetriever  — HNSW search over ticker_embeddings (vectors.duckdb)
                               Falls back to keyword search when index is empty.
-  2. EDGARFactsRetriever    — structured EDGAR financial facts (ibkr.duckdb)
+  2. EDGARFactsRetriever    — structured EDGAR financial facts (equity.duckdb)
 
 Generation uses the same LLM provider as chat_engine (CHAT_PROVIDER in .env).
 
@@ -25,9 +25,9 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
 from etl.embed_tickers import _get_model
-from etl.chat_engine import _BASE_URL, _MODEL, _KEY_ENV
+from etl.chat_engine import _CFG, _MODEL
 
-DB_PATH = os.getenv("DB_PATH", "./data/ibkr.duckdb")
+DB_PATH = os.getenv("DB_PATH", "./data/equity.duckdb")
 EMBEDDING_DIM = 384
 
 
@@ -35,7 +35,7 @@ EMBEDDING_DIM = 384
 
 class DuckDBVectorRetriever(BaseRetriever):
     """
-    HNSW vector search over ticker_embeddings in ibkr.duckdb.
+    HNSW vector search over ticker_embeddings in equity.duckdb.
     Falls back to ILIKE keyword search over polygon_tickers.description
     when the vector index is empty.
     """
@@ -310,20 +310,21 @@ def build_rag_chain():
     """Build LCEL RAG chain."""
     from etl.chat_engine import _PROVIDER
 
-    if _PROVIDER == "anthropic":
+    key_env = _CFG["api_key_env"]
+    base_url = _CFG["base_url"]
+    allow_blank = _CFG["allow_blank_key"]
+
+    if _CFG["sdk"] == "anthropic":
         from langchain_anthropic import ChatAnthropic
-        api_key = os.getenv(_KEY_ENV, "")
+        api_key = os.getenv(key_env, "")
         if not api_key:
-            raise ValueError(f"RAG: {_KEY_ENV} not set in .env for provider '{_PROVIDER}'")
+            raise ValueError(f"RAG: {key_env} not set in .env for provider '{_PROVIDER}'")
         llm = ChatAnthropic(model=_MODEL, api_key=api_key)
     else:
-        if _KEY_ENV is None:
-            api_key = "ollama"
-        else:
-            api_key = os.getenv(_KEY_ENV, "")
-            if not api_key:
-                raise ValueError(f"RAG: {_KEY_ENV} not set in .env for provider '{_PROVIDER}'")
-        llm = ChatOpenAI(model=_MODEL, api_key=api_key, base_url=_BASE_URL)
+        api_key = os.getenv(key_env, "")
+        if not api_key and not allow_blank:
+            raise ValueError(f"RAG: {key_env} not set in .env for provider '{_PROVIDER}'")
+        llm = ChatOpenAI(model=_MODEL, api_key=api_key or "local", base_url=base_url)
 
     return (
         {

@@ -8,7 +8,7 @@
   "tickers": [
     "ACLS", "ADI", "AEHR", "AMAT", "AMD", "AMKR", "AVGO", "COHU", "ENTG",
     "FORM", "ICHR", "INTC", "KLAC", "KLIC", "LRCX", "MCHP", "MPWR", "MRVL",
-    "MU", "NVDA", "NXPI", "ON", "ONTO", "PLAB", "QCOM", "QRVO", "RKLB",
-    "SPCX", "STM", "SWKS", "TER", "TSM", "TXN", "VECO"
+    "MU", "NVDA", "NXPI", "ON", "ONTO", "PLAB", "QCOM", "QRVO",
+    "STM", "SWKS", "TER", "TSM", "TXN", "VECO"
   ]
 }

@@ -16,21 +16,23 @@ Usage:
     python -m etl.export_to_databricks --all
 """
 import argparse
-import subprocess
 from pathlib import Path
 
+from databricks.sdk.errors import NotFound
+from dotenv import load_dotenv
 from loguru import logger
 
 from db.database import get_connection
 
+load_dotenv(".databricks/.databricks.env")
+
 logger.add("logs/etl_{time:YYYY-MM-DD}.log", rotation="1 day", retention="14 days", level="DEBUG")
 
-EXPORT_DIR   = Path("data/exports")
-DATABRICKS_CLI = "databricks"
+EXPORT_DIR = Path("data/exports")
 
 # Unity Catalog coordinates — change if your catalog/schema differ
-UC_CATALOG = "ibkr"
-UC_SCHEMA  = "smh_workbench"
+UC_CATALOG = "main"
+UC_SCHEMA  = "ibkr"
 UC_VOLUME  = f"/Volumes/{UC_CATALOG}/{UC_SCHEMA}/raw"
 
 TABLES = [
@@ -66,28 +68,45 @@ def export_to_parquet():
 
 
 def upload_to_databricks():
-    """Upload Parquet files to Databricks Unity Catalog Volume via CLI."""
+    """Upload Parquet files to Databricks Unity Catalog Volume via SDK."""
+    from databricks.sdk import WorkspaceClient
+    from databricks.sdk.service.catalog import VolumeType
+
     files = list(EXPORT_DIR.glob("*.parquet"))
     if not files:
         logger.error(f"No Parquet files found in {EXPORT_DIR}. Run --export first.")
         return
 
+    w = WorkspaceClient()
+
+    # Ensure schema / volume exist (catalog must already exist)
+    try:
+        w.schemas.get(f"{UC_CATALOG}.{UC_SCHEMA}")
+    except NotFound:
+        logger.info(f"Creating schema {UC_CATALOG}.{UC_SCHEMA}")
+        w.schemas.create(UC_SCHEMA, catalog_name=UC_CATALOG)
+
+    try:
+        w.volumes.read(f"{UC_CATALOG}.{UC_SCHEMA}.raw")
+    except NotFound:
+        logger.info(f"Creating volume {UC_CATALOG}.{UC_SCHEMA}.raw")
+        w.volumes.create(
+            catalog_name=UC_CATALOG,
+            schema_name=UC_SCHEMA,
+            name="raw",
+            volume_type=VolumeType.MANAGED,
+        )
+
     logger.info(f"Uploading {len(files)} files to {UC_VOLUME}")
-
-    # Ensure Volume path exists
-    subprocess.run([DATABRICKS_CLI, "fs", "mkdirs", UC_VOLUME], check=False)
-
     for f in files:
         dest = f"{UC_VOLUME}/{f.name}"
-        logger.info(f"Uploading {f.name} → {dest}")
-        result = subprocess.run(
-            [DATABRICKS_CLI, "fs", "cp", str(f), dest, "--overwrite"],
-            capture_output=True, text=True
-        )
-        if result.returncode != 0:
-            logger.error(f"Upload failed for {f.name}: {result.stderr.strip()}")
-        else:
+        logger.info(f"Uploading {f.name} ({round(f.stat().st_size/1024/1024, 1)} MB) → {dest}")
+        try:
+            with open(f, "rb") as fh:
+                w.files.upload(dest, fh, overwrite=True)
             logger.info(f"{f.name}: uploaded OK")
+        except Exception as e:
+            logger.error(f"{f.name}: upload failed — {e}")
 
 
 def create_delta_tables():
@@ -119,7 +138,7 @@ for table in tables:
         print(f"✗ {{table}}: {{e}}")
 """
     notebook_path = Path("databricks_create_tables.py")
-    notebook_path.write_text(cell.strip())
+    notebook_path.write_text(cell.strip(), encoding="utf-8")
     logger.info(f"Notebook cell written to {notebook_path}")
     logger.info("Copy the contents into a Databricks notebook and run it.")
     print(f"\n{'='*60}")

@@ -109,13 +109,13 @@ def _get_secret(scope: str, key: str):
 
 def _resolve_credentials():
     """Return (access_key, secret_key) from Databricks secrets or env vars."""
-    access_key = _get_secret("polygon", "access_key_id") or os.environ.get("POLYGON_Access_KEY_ID")
+    access_key = _get_secret("polygon", "access_key_id") or os.environ.get("POLYGON_ACCESS_KEY_ID") or os.environ.get("POLYGON_Access_KEY_ID")
     secret_key = _get_secret("polygon", "secret_access_key") or os.environ.get("POLYGON_SECRET_ACCESS_KEY")
     if not access_key or not secret_key:
         raise RuntimeError(
             "Missing Polygon S3 credentials. Set Databricks secrets "
             "scope 'polygon' (access_key_id/secret_access_key) or env vars "
-            "POLYGON_Access_KEY_ID / POLYGON_SECRET_ACCESS_KEY."
+            "POLYGON_ACCESS_KEY_ID / POLYGON_SECRET_ACCESS_KEY."
         )
     return access_key, secret_key
 

@@ -1,47 +1,58 @@
 """
-Natural-language chat interface over the IBKR/Polygon/EDGAR DuckDB database.
+Natural-language chat interface over the Equity Workbench/Polygon/EDGAR DuckDB database.
 
 Supported providers:
-  CHAT_PROVIDER = deepseek | mimo
+  CHAT_PROVIDER = deepseek | mimo | openai | anthropic | ollama
   CHAT_MODEL    = optional model override
 """
 import os
 import re
 from typing import Optional
 
+import anthropic
 import duckdb
 import pandas as pd
 from loguru import logger
 from openai import OpenAI
 
-DB_PATH = os.getenv("DB_PATH", "./data/ibkr.duckdb")
+DB_PATH = os.getenv("DB_PATH", "./data/equity.duckdb")
 
 _PROVIDERS = {
-    "deepseek": {
-        "base_url": "https://api.deepseek.com",
-        "model": "deepseek-chat",
-        "api_key_env": "DEEPSEEK_API_KEY",
+    # Pipeline stage 1 — fast generation (Claude Haiku via Anthropic SDK)
+    "mimo": {
+        "sdk": "anthropic",
+        "base_url": "https://api.anthropic.com",
+        "model": "claude-haiku-4-5-20251001",
+        "api_key_env": "ANTHROPIC_API_KEY",
         "allow_blank_key": False,
     },
-    "mimo": {
-        "base_url": os.getenv("MIMO_BASE_URL", "http://localhost:11434/v1"),
-        "model": os.getenv("MIMO_MODEL", "xiaomi/MiMo-7B-RL"),
-        "api_key_env": "MIMO_API_KEY",
-        "allow_blank_key": True,
+    # Pipeline stage 2 — first review (Claude Sonnet via Anthropic SDK)
+    "deepseek": {
+        "sdk": "anthropic",
+        "base_url": "https://api.anthropic.com",
+        "model": "claude-sonnet-4-6",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "allow_blank_key": False,
     },
+    # Pipeline stage 3 / single-provider default — final review (Claude Sonnet)
+    "anthropic": {
+        "sdk": "anthropic",
+        "base_url": "https://api.anthropic.com",
+        "model": "claude-sonnet-4-6",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "allow_blank_key": False,
+    },
+    # Native OpenAI (unchanged)
     "openai": {
+        "sdk": "openai",
         "base_url": "https://api.openai.com/v1",
         "model": "gpt-4o",
         "api_key_env": "OPENAI_API_KEY",
         "allow_blank_key": False,
     },
-    "anthropic": {
-        "base_url": "https://api.anthropic.com/v1",  # used by rag_engine only; chat_engine raises ValueError for this provider
-        "model": "claude-sonnet-4-6",
-        "api_key_env": "ANTHROPIC_API_KEY",
-        "allow_blank_key": False,
-    },
+    # Local Ollama (unchanged)
     "ollama": {
+        "sdk": "openai",
         "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
         "model": os.getenv("OLLAMA_MODEL", "llama3.2"),
         "api_key_env": "OLLAMA_API_KEY",
@@ -51,9 +62,7 @@ _PROVIDERS = {
 
 _PROVIDER = os.getenv("CHAT_PROVIDER", "deepseek").lower()
 _CFG = _PROVIDERS.get(_PROVIDER, _PROVIDERS["deepseek"])
-_BASE_URL = _CFG["base_url"]
-_MODEL = os.getenv("CHAT_MODEL") or _CFG["model"]
-_KEY_ENV = _CFG["api_key_env"]
+_MODEL = os.getenv("CHAT_MODEL") or _CFG["model"]  # CHAT_MODEL env overrides provider default
 
 SCHEMA = """
 You have access to a DuckDB financial database with these tables:
@@ -94,20 +103,126 @@ Rules:
 """
 
 
-def _get_client() -> OpenAI:
-    if _PROVIDER == "anthropic":
-        raise ValueError(
-            "Anthropic's API is not OpenAI-compatible and cannot be used with the SQL chat "
-            "interface (which uses the OpenAI client). "
-            "For SQL chat use CHAT_PROVIDER=deepseek, openai, ollama, or mimo. "
-            "Anthropic is supported in RAG mode (rag_engine) via langchain-anthropic."
+def _call_provider(provider: str, messages: list, max_tokens: int = 1024, model: Optional[str] = None) -> str:
+    """Call a specific provider by name and return the text reply."""
+    cfg = _PROVIDERS.get(provider, _PROVIDERS["anthropic"])
+    model = model or cfg["model"]
+    api_key = os.getenv(cfg["api_key_env"], "")
+    if not api_key and not cfg["allow_blank_key"]:
+        raise ValueError(f"{cfg['api_key_env']} is not set in .env (provider={provider}).")
+
+    if cfg.get("sdk", "openai") == "anthropic":
+        client = anthropic.Anthropic(api_key=api_key)
+        system = next((m["content"] for m in messages if m["role"] == "system"), "")
+        user_msgs = [m for m in messages if m["role"] != "system"]
+        resp = client.messages.create(
+            model=model, max_tokens=max_tokens, system=system, messages=user_msgs,
         )
-    api_key = os.getenv(_KEY_ENV, "")
-    if not api_key and not _CFG["allow_blank_key"]:
-        raise ValueError(
-            f"{_KEY_ENV} is not set in .env (CHAT_PROVIDER={_PROVIDER})."
+        text_block = next(b for b in resp.content if b.type == "text")
+        return text_block.text
+    else:
+        client = OpenAI(api_key=api_key or "local", base_url=cfg["base_url"])
+        resp = client.chat.completions.create(
+            model=model, messages=messages, temperature=0.1, max_tokens=max_tokens,
         )
-    return OpenAI(api_key=api_key or "local", base_url=_BASE_URL)
+        return (resp.choices[0].message.content or "").strip()
+
+
+def _call_llm(messages: list, max_tokens: int = 1024) -> str:
+    """Send messages to the configured provider, respecting CHAT_MODEL override."""
+    return _call_provider(_PROVIDER, messages, max_tokens, model=_MODEL)
+
+
+_REVIEW_PROMPT = """You are reviewing a DuckDB SQL query generated by another model.
+Check for:
+1. Correctness — does it answer the user's question?
+2. Safety — read-only SELECT/WITH only, no data mutation.
+3. DuckDB syntax — valid functions, correct quoting.
+
+Respond with one of:
+- APPROVED: <brief reason>
+- CORRECTED: <brief reason>
+```sql
+<corrected query>
+```
+"""
+
+
+def chat_pipeline(question: str, history: Optional[list] = None, max_rows: int = 100) -> dict:
+    """
+    3-stage pipeline: MiMo generates SQL → DeepSeek reviews → Claude approves.
+
+    Each stage can correct the SQL before passing it forward.
+    Falls back gracefully if a review stage fails.
+    """
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": question})
+
+    # Stage 1: MiMo generates SQL
+    try:
+        raw = _call_provider("mimo", messages, max_tokens=1024)
+    except Exception as e:
+        logger.error(f"MiMo generation failed: {e}")
+        return {"type": "error", "sql": None, "data": None, "answer": f"Generation error: {e}"}
+
+    if raw.startswith("ANSWER:"):
+        return {"type": "text", "sql": None, "data": None, "answer": raw[len("ANSWER:"):].strip()}
+
+    sql = _clean_sql(raw)
+
+    def _extract_corrected(review: str) -> Optional[str]:
+        m = re.search(r"```sql\n(.*?)\n```", review, re.DOTALL)
+        return m.group(1).strip() if m else None
+
+    # Stage 2: DeepSeek first review
+    try:
+        ds_review = _call_provider("deepseek", [
+            {"role": "system", "content": _REVIEW_PROMPT},
+            {"role": "user", "content": f"Question: {question}\n\nSQL:\n```sql\n{sql}\n```"},
+        ], max_tokens=512)
+        logger.info(f"DeepSeek review: {ds_review[:80]}")
+        if ds_review.startswith("CORRECTED:"):
+            corrected = _extract_corrected(ds_review)
+            if corrected:
+                sql = corrected
+    except Exception as e:
+        logger.warning(f"DeepSeek review skipped: {e}")
+
+    # Stage 3: Claude final review
+    try:
+        claude_review = _call_provider("anthropic", [
+            {"role": "system", "content": _REVIEW_PROMPT},
+            {"role": "user", "content": f"Question: {question}\n\nSQL:\n```sql\n{sql}\n```"},
+        ], max_tokens=512)
+        logger.info(f"Claude review: {claude_review[:80]}")
+        if claude_review.startswith("CORRECTED:"):
+            corrected = _extract_corrected(claude_review)
+            if corrected:
+                sql = corrected
+        elif not claude_review.startswith("APPROVED"):
+            return {"type": "error", "sql": sql, "data": None, "answer": f"Review rejected: {claude_review}"}
+    except Exception as e:
+        logger.warning(f"Claude review skipped: {e}")
+
+    validation_error = _validate_read_only_sql(sql)
+    if validation_error:
+        return {"type": "error", "sql": sql, "data": None, "answer": validation_error}
+
+    try:
+        with duckdb.connect(DB_PATH, read_only=True) as conn:
+            try:
+                conn.execute("SET enable_external_access=false")
+            except Exception as _e:
+                logger.debug(f"Could not set enable_external_access=false: {_e}")
+            df = conn.execute(f"SELECT * FROM ({sql}) AS chat_result LIMIT ?", (max_rows,)).df()
+    except Exception as e:
+        logger.warning(f"SQL execution failed: {e}\nSQL: {sql}")
+        return {"type": "error", "sql": sql, "data": None, "answer": f"SQL error: {e}"}
+
+    answer = "The query returned no results." if df.empty else _summarise(question, df)
+    return {"type": "table", "sql": sql, "data": df.head(max_rows), "answer": answer}
 
 
 def chat(question: str, history: Optional[list] = None, max_rows: int = 100) -> dict:
@@ -116,20 +231,13 @@ def chat(question: str, history: Optional[list] = None, max_rows: int = 100) -> 
 
     Returns a dict with type, sql, data, and answer fields.
     """
-    client = _get_client()
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
         messages.extend(history)
     messages.append({"role": "user", "content": question})
 
     try:
-        response = client.chat.completions.create(
-            model=_MODEL,
-            messages=messages,
-            temperature=0.1,
-            max_tokens=1024,
-        )
-        reply = response.choices[0].message.content.strip()
+        reply = _call_llm(messages, max_tokens=1024)
     except Exception as e:
         logger.error(f"{_PROVIDER} API error: {e}")
         return {"type": "error", "sql": None, "data": None, "answer": f"API error: {e}"}
@@ -149,12 +257,16 @@ def chat(question: str, history: Optional[list] = None, max_rows: int = 100) -> 
 
     try:
         with duckdb.connect(DB_PATH, read_only=True) as conn:
+            try:
+                conn.execute("SET enable_external_access=false")
+            except Exception as _e:
+                logger.debug(f"Could not set enable_external_access=false: {_e}")
             df = conn.execute(f"SELECT * FROM ({sql}) AS chat_result LIMIT ?", (max_rows,)).df()
     except Exception as e:
         logger.warning(f"SQL execution failed: {e}\nSQL: {sql}")
         return {"type": "error", "sql": sql, "data": None, "answer": f"SQL error: {e}"}
 
-    answer = "The query returned no results." if df.empty else _summarise(client, question, df)
+    answer = "The query returned no results." if df.empty else _summarise(question, df)
     return {"type": "table", "sql": sql, "data": df.head(max_rows), "answer": answer}
 
 
@@ -196,22 +308,16 @@ def _validate_read_only_sql(sql: str) -> Optional[str]:
     return None
 
 
-def _summarise(client: OpenAI, question: str, df: pd.DataFrame) -> str:
+def _summarise(question: str, df: pd.DataFrame) -> str:
     preview = df.head(5).to_markdown(index=False)
     try:
-        resp = client.chat.completions.create(
-            model=_MODEL,
-            messages=[{
-                "role": "user",
-                "content": (
-                    f'The user asked: "{question}"\n\n'
-                    f"Query returned {len(df)} rows. Here are the first 5:\n{preview}\n\n"
-                    "Write a concise 1-2 sentence plain-English answer. No markdown."
-                ),
-            }],
-            temperature=0.3,
-            max_tokens=200,
-        )
-        return resp.choices[0].message.content.strip()
+        return _call_llm([{
+            "role": "user",
+            "content": (
+                f'The user asked: "{question}"\n\n'
+                f"Query returned {len(df)} rows. Here are the first 5:\n{preview}\n\n"
+                "Write a concise 1-2 sentence plain-English answer. No markdown."
+            ),
+        }], max_tokens=200)
     except Exception:
         return f"Query returned {len(df)} rows."

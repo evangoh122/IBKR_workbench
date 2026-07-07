@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 from typing import Optional
@@ -157,8 +158,8 @@ silver/gold transformation.
     logger.info(f"Wrote dataset card → {readme}")
 
 
-def push_to_hub(out_dir: str, repo: str, private: bool = False, token: Optional[str] = None):
-    """Push the staged dataset folder to the HuggingFace Hub."""
+def push_to_hub(out_dir: str, repo: str, private: bool = False, token: Optional[str] = None) -> bool:
+    """Push the staged dataset folder to the HuggingFace Hub. Returns True on success."""
     try:
         from huggingface_hub import HfApi
     except ImportError:
@@ -166,20 +167,26 @@ def push_to_hub(out_dir: str, repo: str, private: bool = False, token: Optional[
             "huggingface_hub is not installed. Run `pip install huggingface_hub` "
             "to enable --push."
         )
-        return
+        return False
 
     if not repo:
         logger.error("No repo specified. Pass --repo or set HF_DATASET_REPO.")
-        return
+        return False
 
     folder = Path(out_dir)
     if not folder.is_absolute():
         folder = _REPO_ROOT / folder
 
-    api = HfApi(token=token or os.getenv("HF_TOKEN"))
-    api.create_repo(repo, repo_type="dataset", private=private, exist_ok=True)
-    api.upload_folder(folder_path=str(folder), repo_id=repo, repo_type="dataset")
+    try:
+        api = HfApi(token=token or os.getenv("HF_TOKEN"))
+        api.create_repo(repo, repo_type="dataset", private=private, exist_ok=True)
+        api.upload_folder(folder_path=str(folder), repo_id=repo, repo_type="dataset")
+    except Exception as e:
+        logger.error(f"Failed to push {folder} → {repo}: {e}")
+        return False
+
     logger.info(f"Pushed {folder} → https://huggingface.co/datasets/{repo}")
+    return True
 
 
 def main():
@@ -209,7 +216,9 @@ def main():
         export_parquet(args.universe, args.out_dir)
 
     if args.push:
-        push_to_hub(args.out_dir, args.repo, private=args.private, token=args.token)
+        ok = push_to_hub(args.out_dir, args.repo, private=args.private, token=args.token)
+        if not ok:
+            sys.exit(1)
 
 
 if __name__ == "__main__":

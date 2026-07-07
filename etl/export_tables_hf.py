@@ -10,6 +10,7 @@ Usage:
 """
 import argparse
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -44,18 +45,22 @@ def export_parquet(out_dir: str = _DEFAULT_OUT) -> Path:
     manifest = []
     with get_connection() as conn:
         for table in _TABLES:
-            row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
-            count = row[0] if row else 0
-            if count == 0:
-                logger.warning(f"{table}: empty, skipping")
+            try:
+                row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+                count = row[0] if row else 0
+                if count == 0:
+                    logger.warning(f"{table}: empty, skipping")
+                    continue
+                dest = out_path / f"{table}.parquet"
+                conn.execute(
+                    f"COPY {table} TO '{dest.as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+                )
+                size_mb = dest.stat().st_size / (1024 * 1024)
+                logger.info(f"{table}: {count:,} rows -> {dest.name} ({size_mb:.1f} MB)")
+                manifest.append((table, count, size_mb))
+            except Exception as e:
+                logger.warning(f"{table}: skipped — {e}")
                 continue
-            dest = out_path / f"{table}.parquet"
-            conn.execute(
-                f"COPY {table} TO '{dest.as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)"
-            )
-            size_mb = dest.stat().st_size / (1024 * 1024)
-            logger.info(f"{table}: {count:,} rows -> {dest.name} ({size_mb:.1f} MB)")
-            manifest.append((table, count, size_mb))
 
     _write_card(out_path, manifest)
     return out_path
@@ -104,20 +109,25 @@ Or read directly with pandas / DuckDB / polars via the same `hf_hub_download` pa
     logger.info(f"Wrote dataset card -> {out_dir / 'README.md'}")
 
 
-def push_to_hub(out_dir: str, repo: str, private: bool = False):
-    """Push the Parquet folder to a HuggingFace dataset repo."""
+def push_to_hub(out_dir: str, repo: str, private: bool = False) -> bool:
+    """Push the Parquet folder to a HuggingFace dataset repo. Returns True on success."""
     try:
         from huggingface_hub import HfApi
     except ImportError:
         logger.error("huggingface_hub not installed. Run `pip install huggingface_hub`.")
-        return
+        return False
     folder = Path(out_dir)
     if not folder.is_absolute():
         folder = _REPO_ROOT / folder
-    api = HfApi(token=os.getenv("HF_TOKEN"))
-    api.create_repo(repo, repo_type="dataset", private=private, exist_ok=True)
-    api.upload_folder(folder_path=str(folder), repo_id=repo, repo_type="dataset")
+    try:
+        api = HfApi(token=os.getenv("HF_TOKEN"))
+        api.create_repo(repo, repo_type="dataset", private=private, exist_ok=True)
+        api.upload_folder(folder_path=str(folder), repo_id=repo, repo_type="dataset")
+    except Exception as e:
+        logger.error(f"Failed to push {folder} -> {repo}: {e}")
+        return False
     logger.info(f"Pushed {folder} -> https://huggingface.co/datasets/{repo}")
+    return True
 
 
 def main():
@@ -131,7 +141,9 @@ def main():
 
     export_parquet(args.out_dir)
     if args.push:
-        push_to_hub(args.out_dir, args.repo, private=args.private)
+        ok = push_to_hub(args.out_dir, args.repo, private=args.private)
+        if not ok:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
