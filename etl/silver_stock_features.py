@@ -80,6 +80,10 @@ def _build_sql(placeholders: str) -> str:
              ma_20, ma_50, ma_100,
              std_20, std_50, std_100,
              zscore_20, zscore_50, zscore_100,
+             sigma_flag_20, sigma_flag_50, sigma_flag_100,
+             pct_change,
+             zscore_ret_20, zscore_ret_50, zscore_ret_100,
+             sigma_flag_ret_20, sigma_flag_ret_50, sigma_flag_ret_100,
              vwap_20, vwap_50, vwap_100)
         WITH base AS (
             SELECT
@@ -94,6 +98,13 @@ def _build_sql(placeholders: str) -> str:
             WHERE timespan = 'day'
               AND ticker IN ({placeholders})
         ),
+        rets AS (
+            SELECT
+                *,
+                close / NULLIF(lag(close) OVER (PARTITION BY ticker ORDER BY trade_date), 0) - 1
+                    AS ret
+            FROM base
+        ),
         feat AS (
             SELECT
                 ticker,
@@ -101,12 +112,15 @@ def _build_sql(placeholders: str) -> str:
                 trade_date,
                 close,
                 volume,
-                -- simple daily return; lag NULL on first row → NULL naturally
-                close / NULLIF(lag(close) OVER w, 0) - 1              AS daily_return,
+                ret,
                 -- window row counts (drive the min-periods guards)
                 count(close) OVER w20  AS n20,
                 count(close) OVER w50  AS n50,
                 count(close) OVER w100 AS n100,
+                -- return window counts for warm-up guards on return features
+                count(ret) OVER w20  AS n_ret20,
+                count(ret) OVER w50  AS n_ret50,
+                count(ret) OVER w100 AS n_ret100,
                 -- moving averages
                 avg(close) OVER w20    AS ma20_raw,
                 avg(close) OVER w50    AS ma50_raw,
@@ -115,6 +129,13 @@ def _build_sql(placeholders: str) -> str:
                 stddev_samp(close) OVER w20   AS std20_raw,
                 stddev_samp(close) OVER w50   AS std50_raw,
                 stddev_samp(close) OVER w100  AS std100_raw,
+                -- rolling return stats for return z-scores
+                avg(ret) OVER w20   AS mean_ret20,
+                avg(ret) OVER w50   AS mean_ret50,
+                avg(ret) OVER w100  AS mean_ret100,
+                stddev_samp(ret) OVER w20   AS std_ret20,
+                stddev_samp(ret) OVER w50   AS std_ret50,
+                stddev_samp(ret) OVER w100  AS std_ret100,
                 -- rolling VWAP numerator/denominator, typical = (h+l+c)/3
                 sum(((high + low + close) / 3.0) * volume) OVER w20   AS tpv20,
                 sum(((high + low + close) / 3.0) * volume) OVER w50   AS tpv50,
@@ -122,9 +143,8 @@ def _build_sql(placeholders: str) -> str:
                 sum(volume) OVER w20   AS vol20,
                 sum(volume) OVER w50   AS vol50,
                 sum(volume) OVER w100  AS vol100
-            FROM base
+            FROM rets
             WINDOW
-                w    AS (PARTITION BY ticker ORDER BY trade_date),
                 w20  AS (PARTITION BY ticker ORDER BY trade_date
                          ROWS BETWEEN 19 PRECEDING AND CURRENT ROW),
                 w50  AS (PARTITION BY ticker ORDER BY trade_date
@@ -138,7 +158,7 @@ def _build_sql(placeholders: str) -> str:
             trade_date,
             close,
             volume,
-            daily_return,
+            ret AS daily_return,
             CASE WHEN n20  = 20  THEN ma20_raw  END AS ma_20,
             CASE WHEN n50  = 50  THEN ma50_raw  END AS ma_50,
             CASE WHEN n100 = 100 THEN ma100_raw END AS ma_100,
@@ -148,6 +168,50 @@ def _build_sql(placeholders: str) -> str:
             CASE WHEN n20  = 20  THEN (close - ma20_raw)  / NULLIF(std20_raw,  0) END AS zscore_20,
             CASE WHEN n50  = 50  THEN (close - ma50_raw)  / NULLIF(std50_raw,  0) END AS zscore_50,
             CASE WHEN n100 = 100 THEN (close - ma100_raw) / NULLIF(std100_raw, 0) END AS zscore_100,
+            -- +-3s sigma band flags (close price)
+            CASE
+                WHEN n20 < 20 THEN NULL
+                WHEN (close - ma20_raw) / NULLIF(std20_raw, 0) >  3 THEN '+3s'
+                WHEN (close - ma20_raw) / NULLIF(std20_raw, 0) < -3 THEN '-3s'
+                ELSE 'normal'
+            END AS sigma_flag_20,
+            CASE
+                WHEN n50 < 50 THEN NULL
+                WHEN (close - ma50_raw) / NULLIF(std50_raw, 0) >  3 THEN '+3s'
+                WHEN (close - ma50_raw) / NULLIF(std50_raw, 0) < -3 THEN '-3s'
+                ELSE 'normal'
+            END AS sigma_flag_50,
+            CASE
+                WHEN n100 < 100 THEN NULL
+                WHEN (close - ma100_raw) / NULLIF(std100_raw, 0) >  3 THEN '+3s'
+                WHEN (close - ma100_raw) / NULLIF(std100_raw, 0) < -3 THEN '-3s'
+                ELSE 'normal'
+            END AS sigma_flag_100,
+            -- pct_change: daily return expressed as percent
+            ret * 100 AS pct_change,
+            -- return z-scores: how unusual is today's return vs recent distribution
+            CASE WHEN n_ret20  = 20  THEN (ret - mean_ret20)  / NULLIF(std_ret20,  0) END AS zscore_ret_20,
+            CASE WHEN n_ret50  = 50  THEN (ret - mean_ret50)  / NULLIF(std_ret50,  0) END AS zscore_ret_50,
+            CASE WHEN n_ret100 = 100 THEN (ret - mean_ret100) / NULLIF(std_ret100, 0) END AS zscore_ret_100,
+            -- sigma flags on returns
+            CASE
+                WHEN n_ret20 < 20 THEN NULL
+                WHEN (ret - mean_ret20) / NULLIF(std_ret20, 0) >  3 THEN '+3s'
+                WHEN (ret - mean_ret20) / NULLIF(std_ret20, 0) < -3 THEN '-3s'
+                ELSE 'normal'
+            END AS sigma_flag_ret_20,
+            CASE
+                WHEN n_ret50 < 50 THEN NULL
+                WHEN (ret - mean_ret50) / NULLIF(std_ret50, 0) >  3 THEN '+3s'
+                WHEN (ret - mean_ret50) / NULLIF(std_ret50, 0) < -3 THEN '-3s'
+                ELSE 'normal'
+            END AS sigma_flag_ret_50,
+            CASE
+                WHEN n_ret100 < 100 THEN NULL
+                WHEN (ret - mean_ret100) / NULLIF(std_ret100, 0) >  3 THEN '+3s'
+                WHEN (ret - mean_ret100) / NULLIF(std_ret100, 0) < -3 THEN '-3s'
+                ELSE 'normal'
+            END AS sigma_flag_ret_100,
             CASE WHEN n20  = 20  THEN tpv20  / NULLIF(vol20,  0) END AS vwap_20,
             CASE WHEN n50  = 50  THEN tpv50  / NULLIF(vol50,  0) END AS vwap_50,
             CASE WHEN n100 = 100 THEN tpv100 / NULLIF(vol100, 0) END AS vwap_100
@@ -182,6 +246,10 @@ def main():
     placeholders = ", ".join(["?"] * len(tickers))
     try:
         with get_connection() as conn:
+            conn.execute(
+                f"DELETE FROM silver_stock_features WHERE ticker IN ({placeholders})",
+                tickers,
+            )
             conn.execute(_build_sql(placeholders), tickers)
             # Count rows for this universe after the rebuild.
             rows = conn.execute(

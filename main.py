@@ -320,6 +320,9 @@ def main():
                             "polygon-ticks", "polygon-semis",
                             "embed-tickers", "embed-edgar",
                             "edgar-filings", "edgar-facts", "cot",
+                            "ingest-loop",       # full bronze→silver pipeline
+                            "silver-stock",      # silver stock features only
+                            "zscore-alerts",     # print current ±3σ breaches
                         ],
                         default="all")
     parser.add_argument("--schedule", action="store_true",
@@ -331,6 +334,46 @@ def main():
     # Initialise databases
     init_db()
 
+    # ── ingest-loop / silver-stock / zscore-alerts ───────────────────────────
+    if args.job == "ingest-loop":
+        from etl.ingest_loop import run_pipeline
+        if not args.schedule:
+            run_pipeline()
+        else:
+            from etl.ingest_loop import main as _loop_main
+            sys.argv = [sys.argv[0], "--schedule"]
+            _loop_main()
+        return
+
+    if args.job == "silver-stock":
+        from etl.silver_stock_features import main as _ssf_main
+        _ssf_main()
+        return
+
+    if args.job == "zscore-alerts":
+        from etl.ingest_loop import _log_sigma_summary
+        _log_sigma_summary()
+        # Also print table to stdout for quick CLI use
+        from db.database import get_connection
+        with get_connection() as conn:
+            rows = conn.execute("""
+                SELECT ticker, trade_date, close,
+                       ROUND(zscore_20, 2)  AS z20,
+                       ROUND(zscore_50, 2)  AS z50,
+                       ROUND(zscore_100,2)  AS z100,
+                       sigma_flag_20, sigma_flag_50, sigma_flag_100,
+                       any_breach, ROUND(max_abs_zscore, 2) AS max_z
+                FROM v_zscore_alerts
+                ORDER BY max_abs_zscore DESC
+            """).fetchall()
+        print(f"\n{'TICKER':<7} {'DATE':<12} {'CLOSE':>8} {'Z20':>6} {'Z50':>6} {'Z100':>6}  {'F20':<8} {'F50':<8} {'F100':<8}  BREACH")
+        print("─" * 80)
+        for r in rows:
+            ticker, date, close, z20, z50, z100, f20, f50, f100, breach, _ = r
+            mark = "⚠" if breach else " "
+            print(f"{ticker:<7} {str(date):<12} {close:>8.2f} {str(z20):>6} {str(z50):>6} {str(z100):>6}  {str(f20):<8} {str(f50):<8} {str(f100):<8}  {mark}")
+        return
+
     # Jobs that don't need a TWS connection
     polygon_only_jobs = {
         "polygon":              job_polygon_all,
@@ -338,8 +381,7 @@ def main():
         "polygon-quotes":       job_polygon_snapshots,
         "polygon-options":      job_polygon_options,
         "polygon-option-bars":  job_polygon_option_bars,
-        "polygon-ref":          job_polygon_reference,
-        "polygon-ticks":        job_polygon_ticks,
+        "polygon-ref":          job_polygon_reference,        "polygon-ticks":        job_polygon_ticks,
         "polygon-semis":        job_polygon_semis,
         "embed-tickers":        job_embed_tickers,
         "embed-edgar":          job_embed_edgar,
@@ -347,55 +389,31 @@ def main():
         "edgar-facts":          job_edgar_facts,
         "cot":                  job_cot,
     }
+
     if args.job in polygon_only_jobs:
-        fn = polygon_only_jobs[args.job]
-        if not args.schedule:
-            fn()
-        else:
-            logger.info(f"Scheduled mode: running every {POLL_SECS}s (Ctrl-C to stop)")
-            fn()
-            schedule.every(POLL_SECS).seconds.do(fn)
-            try:
-                while True:
-                    schedule.run_pending()
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                logger.info("Stopped by user")
+        polygon_only_jobs[args.job]()
         return
 
-    # IBKR jobs require a TWS connection
-    client = IBKRClient(TWS_HOST, TWS_PORT, TWS_CLIENT)
-    try:
-        client.connect_and_run()
-    except ConnectionError as e:
-        logger.error(str(e))
-        sys.exit(1)
-
-    dispatch = {
-        "stocks":  lambda: job_stocks(client),
-        "options": lambda: job_options(client),
-        "chain":   lambda: job_chain(client),
-        "all":     lambda: run_all(client, refresh_chain=args.refresh_chain),
+    # Jobs that need a live TWS/IBKR gateway connection
+    tws_jobs = {
+        "stocks": job_stocks,
+        "chain":  job_chain,
+        "options": job_options,
     }
-    fn = dispatch[args.job]
 
-    try:
-        if not args.schedule:
-            fn()
-        else:
-            logger.info(f"Scheduled mode: running every {POLL_SECS}s (Ctrl-C to stop)")
-            fn()   # run immediately on start
-            schedule.every(POLL_SECS).seconds.do(fn)
-            # Re-fetch chain once per day
-            schedule.every().day.at("09:00").do(lambda: job_chain(client))
-            try:
-                while True:
-                    schedule.run_pending()
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                logger.info("Stopped by user")
-    finally:
-        client.disconnect_and_stop()
+    if args.job in tws_jobs:
+        client = IBKRClient()
+        client.connect(
+            os.getenv("TWS_HOST", "127.0.0.1"),
+            int(os.getenv("TWS_PORT", "7497")),
+            int(os.getenv("TWS_CLIENT_ID", "1")),
+        )
+        tws_jobs[args.job](client)
+        client.disconnect()
+        return
+
+    logger.error(f"Unknown job: {args.job}")
+    sys.exit(1)
 
 
 if __name__ == "__main__":

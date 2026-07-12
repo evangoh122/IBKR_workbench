@@ -316,8 +316,8 @@ def init_db():
         """)
         try:
             conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_ticker_emb 
-                ON ticker_embeddings USING HNSW (embedding) 
+                CREATE INDEX IF NOT EXISTS idx_ticker_emb
+                ON ticker_embeddings USING HNSW (embedding)
                 WITH (metric = 'cosine')
             """)
         except Exception as e:
@@ -336,8 +336,8 @@ def init_db():
         """)
         try:
             conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_edgar_emb 
-                ON edgar_embeddings USING HNSW (embedding) 
+                CREATE INDEX IF NOT EXISTS idx_edgar_emb
+                ON edgar_embeddings USING HNSW (embedding)
                 WITH (metric = 'cosine')
             """)
         except Exception as e:
@@ -365,10 +365,23 @@ def init_db():
                 std_20        DOUBLE,
                 std_50        DOUBLE,
                 std_100       DOUBLE,
+                pct_change    DOUBLE,            -- daily_return * 100 (percent)
                 -- price z-score = (close - ma_N) / std_N
                 zscore_20     DOUBLE,
                 zscore_50     DOUBLE,
                 zscore_100    DOUBLE,
+                -- sigma band flag on price: '+3s' | 'normal' | '-3s' | NULL
+                sigma_flag_20  TEXT,
+                sigma_flag_50  TEXT,
+                sigma_flag_100 TEXT,
+                -- return z-score = (pct_change - mean_ret_N) / std_ret_N
+                zscore_ret_20  DOUBLE,
+                zscore_ret_50  DOUBLE,
+                zscore_ret_100 DOUBLE,
+                -- sigma band flag on returns
+                sigma_flag_ret_20  TEXT,
+                sigma_flag_ret_50  TEXT,
+                sigma_flag_ret_100 TEXT,
                 -- rolling VWAP = sum(typical_price*volume)/sum(volume), typical=(h+l+c)/3
                 vwap_20       DOUBLE,
                 vwap_50       DOUBLE,
@@ -377,9 +390,78 @@ def init_db():
                 UNIQUE(ticker, ts)
             )
         """)
+        # ── Migrate: add sigma_flag columns if they don't exist yet ───────────
+        for col in ("sigma_flag_20", "sigma_flag_50", "sigma_flag_100"):
+            try:
+                conn.execute(f"ALTER TABLE silver_stock_features ADD COLUMN {col} TEXT")
+                logger.info(f"Migrated silver_stock_features: added {col}")
+            except Exception:
+                pass  # column already exists
+        for col in ("pct_change",):
+            try:
+                conn.execute(f"ALTER TABLE silver_stock_features ADD COLUMN {col} DOUBLE")
+                logger.info(f"Migrated silver_stock_features: added {col}")
+            except Exception:
+                pass
+        for col in ("zscore_ret_20", "zscore_ret_50", "zscore_ret_100"):
+            try:
+                conn.execute(f"ALTER TABLE silver_stock_features ADD COLUMN {col} DOUBLE")
+                logger.info(f"Migrated silver_stock_features: added {col}")
+            except Exception:
+                pass
+        for col in ("sigma_flag_ret_20", "sigma_flag_ret_50", "sigma_flag_ret_100"):
+            try:
+                conn.execute(f"ALTER TABLE silver_stock_features ADD COLUMN {col} TEXT")
+                logger.info(f"Migrated silver_stock_features: added {col}")
+            except Exception:
+                pass
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_ssf_ticker_date
                 ON silver_stock_features(ticker, trade_date)
+        """)
+
+        # ── View: latest z-score alerts per ticker ─────────────────────────────
+        # Query this view to see which tickers are currently outside +-3 std devs.
+        # sigma_flag values: '+3s' (above), '-3s' (below), 'normal', NULL (warm-up)
+        conn.execute("DROP VIEW IF EXISTS v_zscore_alerts")
+        conn.execute("""
+            CREATE VIEW v_zscore_alerts AS
+            WITH latest AS (
+                SELECT *,
+                       ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY trade_date DESC) AS rn
+                FROM silver_stock_features
+            )
+            SELECT
+                ticker,
+                trade_date,
+                close,
+                pct_change,
+                zscore_20,   sigma_flag_20,
+                zscore_50,   sigma_flag_50,
+                zscore_100,  sigma_flag_100,
+                zscore_ret_20,  sigma_flag_ret_20,
+                zscore_ret_50,  sigma_flag_ret_50,
+                zscore_ret_100, sigma_flag_ret_100,
+                CASE
+                    WHEN sigma_flag_20      IN ('+3s', '-3s')
+                      OR sigma_flag_50      IN ('+3s', '-3s')
+                      OR sigma_flag_100     IN ('+3s', '-3s')
+                      OR sigma_flag_ret_20  IN ('+3s', '-3s')
+                      OR sigma_flag_ret_50  IN ('+3s', '-3s')
+                      OR sigma_flag_ret_100 IN ('+3s', '-3s')
+                    THEN true ELSE false
+                END AS any_breach,
+                GREATEST(
+                    ABS(COALESCE(zscore_20,      0)),
+                    ABS(COALESCE(zscore_50,      0)),
+                    ABS(COALESCE(zscore_100,     0)),
+                    ABS(COALESCE(zscore_ret_20,  0)),
+                    ABS(COALESCE(zscore_ret_50,  0)),
+                    ABS(COALESCE(zscore_ret_100, 0))
+                ) AS max_abs_zscore
+            FROM latest
+            WHERE rn = 1
+            ORDER BY max_abs_zscore DESC
         """)
 
         # ── Silver: per-contract daily option greeks (Black-Scholes-Merton) ────
@@ -412,26 +494,24 @@ def init_db():
         """)
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_sog_underlying_date
+                
                 ON silver_option_greeks(underlying, trade_date)
         """)
 
-        # ── Silver: per-underlying daily options POSITIONING ───────────────────
-        # Aggregated from polygon_option_bars (volume) + silver_option_greeks
-        # (implied_vol, delta). OI-based metrics (GEX/DEX, OI walls) are deferred
-        # until a historical OI feed (CBOE Optsum / ORATS) is wired in.
+        # -- Silver: per-underlying daily options POSITIONING --
         conn.execute("""
             CREATE TABLE IF NOT EXISTS silver_option_positioning (
                 underlying      TEXT    NOT NULL,
-                ts              TEXT    NOT NULL,   -- trading day, ISO-8601
+                ts              TEXT    NOT NULL,
                 trade_date      DATE,
-                total_volume    DOUBLE,            -- all contracts
+                total_volume    DOUBLE,
                 call_volume     DOUBLE,
                 put_volume      DOUBLE,
-                put_call_ratio  DOUBLE,            -- put_volume / call_volume
-                atm_iv          DOUBLE,            -- IV nearest moneyness = 1
-                call_iv_25d     DOUBLE,            -- avg IV of ~25-delta calls
-                put_iv_25d      DOUBLE,            -- avg IV of ~25-delta puts
-                iv_skew_25d     DOUBLE,            -- put_iv_25d - call_iv_25d
+                put_call_ratio  DOUBLE,
+                atm_iv          DOUBLE,
+                call_iv_25d     DOUBLE,
+                put_iv_25d      DOUBLE,
+                iv_skew_25d     DOUBLE,
                 n_contracts     INTEGER,
                 computed_at     TIMESTAMP DEFAULT now(),
                 UNIQUE(underlying, ts)
