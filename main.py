@@ -29,7 +29,6 @@ Environment variables for group filtering and tick data:
 import argparse
 import os
 import sys
-import time
 import warnings
 from functools import wraps
 
@@ -37,7 +36,6 @@ from functools import wraps
 warnings.filterwarnings("ignore", category=UserWarning, module="langchain_core")
 warnings.filterwarnings("ignore", message=".*urllib3.*match a supported version")
 
-import schedule
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -293,6 +291,26 @@ def job_cot():
     return run_cot_etl()
 
 
+@etl_job("silver-cot")
+def job_silver_cot():
+    """Compute silver COT positioning features (rolling 52w z-scores)."""
+    from etl.silver_cot_features import run as run_silver_cot
+    with get_connection() as conn:
+        n = run_silver_cot(conn)
+        conn.commit()
+    return n
+
+
+@etl_job("silver-futures")
+def job_silver_futures():
+    """Compute silver futures price features (index futures + VIX term structure)."""
+    from etl.silver_futures_features import run as run_silver_futures
+    with get_connection() as conn:
+        n = run_silver_futures(conn)
+        conn.commit()
+    return n
+
+
 def run_all(client: IBKRClient, refresh_chain: bool = False):
     if refresh_chain:
         logger.info("── Phase 1: Refreshing option chains ──")
@@ -322,6 +340,8 @@ def main():
                             "edgar-filings", "edgar-facts", "cot",
                             "ingest-loop",       # full bronze→silver pipeline
                             "silver-stock",      # silver stock features only
+                            "silver-cot",        # silver COT positioning features only
+                            "silver-futures",    # silver futures price features only
                             "zscore-alerts",     # print current ±3σ breaches
                         ],
                         default="all")
@@ -388,6 +408,8 @@ def main():
         "edgar-filings":        job_edgar_filings,
         "edgar-facts":          job_edgar_facts,
         "cot":                  job_cot,
+        "silver-cot":           job_silver_cot,
+        "silver-futures":       job_silver_futures,
     }
 
     if args.job in polygon_only_jobs:

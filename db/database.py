@@ -521,6 +521,195 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_sop_underlying_date
                 ON silver_option_positioning(underlying, trade_date)
         """)
+
+        # ── Silver: COT (Commitments of Traders) positioning features ─────────
+        # Source: cot_reports (Bronze, weekly). Grain: one row per (ticker, report_date).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS silver_cot_features (
+                report_date          DATE    NOT NULL,
+                ticker               TEXT    NOT NULL,
+                noncomm_long         BIGINT,
+                noncomm_short        BIGINT,
+                noncomm_net          BIGINT,
+                comm_long            BIGINT,
+                comm_short           BIGINT,
+                comm_net             BIGINT,
+                n_weeks              INTEGER,
+                net_pos_mean_52w     DOUBLE,
+                net_pos_std_52w      DOUBLE,
+                net_pos_zscore_52w   DOUBLE,
+                comm_net_mean_52w    DOUBLE,
+                comm_net_std_52w     DOUBLE,
+                comm_net_zscore_52w  DOUBLE,
+                spec_comm_divergence DOUBLE,
+                crowd_flag           TEXT,
+                computed_at          TIMESTAMP DEFAULT now(),
+                PRIMARY KEY (report_date, ticker)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_scf_ticker_date
+                ON silver_cot_features(ticker, report_date)
+        """)
+
+        # ── Silver: futures continuous-contract price features ────────────────
+        # Source: polygon_bars (Bronze, day bars) for continuous futures tickers
+        # like 'ES1:COM'. Grain: one row per (ticker, trade_date).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS silver_futures_features (
+                trade_date      DATE    NOT NULL,
+                ticker          TEXT    NOT NULL,
+                open_price      DOUBLE,
+                high_price      DOUBLE,
+                low_price       DOUBLE,
+                close_price     DOUBLE,
+                volume          BIGINT,
+                n20             INTEGER,
+                ma_20           DOUBLE,
+                std_20          DOUBLE,
+                zscore_20       DOUBLE,
+                n_ret20         INTEGER,
+                ret             DOUBLE,
+                mean_ret_20     DOUBLE,
+                std_ret_20      DOUBLE,
+                zscore_ret_20   DOUBLE,
+                vx_term_slope   DOUBLE,
+                regime_flag     TEXT,
+                computed_at     TIMESTAMP DEFAULT now(),
+                PRIMARY KEY (trade_date, ticker)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sff_ticker_date
+                ON silver_futures_features(ticker, trade_date)
+        """)
+
+        # ── View: latest COT positioning + futures price context per ticker ───
+        conn.execute("DROP VIEW IF EXISTS v_cot_positioning")
+        conn.execute("""
+            CREATE VIEW v_cot_positioning AS
+            WITH latest_cot AS (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY report_date DESC) AS rn
+                FROM silver_cot_features
+            ),
+            latest_fut AS (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY trade_date DESC) AS rn
+                FROM silver_futures_features
+            )
+            SELECT
+                c.ticker,
+                c.report_date,
+                c.noncomm_net,
+                c.net_pos_zscore_52w,
+                c.comm_net_zscore_52w,
+                c.spec_comm_divergence,
+                c.crowd_flag,
+                f.trade_date AS futures_date,
+                f.close_price AS futures_close,
+                f.zscore_20 AS futures_zscore_20,
+                f.vx_term_slope,
+                f.regime_flag
+            FROM latest_cot c
+            LEFT JOIN latest_fut f ON c.ticker = f.ticker AND f.rn = 1
+            WHERE c.rn = 1
+            ORDER BY ABS(COALESCE(c.net_pos_zscore_52w, 0)) DESC
+        """)
+
+        # ══ GOLD LAYER ════════════════════
+        # Backtest results: runs, trades, portfolio snapshots, metrics, signals.
+
+        # ── Gold: backtest run metadata ───────────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS gold_backtest_runs (
+                run_id      TEXT NOT NULL PRIMARY KEY,
+                config      TEXT,
+                universe    TEXT,
+                start_date  DATE NOT NULL,
+                end_date    DATE NOT NULL,
+                created_at  TIMESTAMP DEFAULT now()
+            )
+        """)
+
+        # ── Gold: individual simulated trades ─────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS gold_trades (
+                trade_id        TEXT    NOT NULL PRIMARY KEY,
+                run_id          TEXT    NOT NULL,
+                ticker          TEXT    NOT NULL,
+                entry_date      DATE    NOT NULL,
+                exit_date       DATE,
+                direction       INTEGER NOT NULL,
+                shares          DOUBLE,
+                entry_price     DOUBLE,
+                exit_price      DOUBLE,
+                gross_pnl       DOUBLE,
+                slippage_cost   DOUBLE,
+                commission_cost DOUBLE,
+                net_pnl         DOUBLE,
+                entry_regime    TEXT,
+                exit_regime     TEXT,
+                signal_type     TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_gt_run_ticker
+                ON gold_trades(run_id, ticker, entry_date)
+        """)
+
+        # ── Gold: daily portfolio snapshots ───────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS gold_portfolio (
+                run_id       TEXT NOT NULL,
+                trade_date   DATE NOT NULL,
+                nav          DOUBLE,
+                cash         DOUBLE,
+                drawdown_pct DOUBLE,
+                n_positions  INTEGER,
+                UNIQUE(run_id, trade_date)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_gp_run_date
+                ON gold_portfolio(run_id, trade_date)
+        """)
+
+        # ── Gold: aggregated metrics per run ──────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS gold_metrics (
+                run_id            TEXT    NOT NULL PRIMARY KEY,
+                sharpe            DOUBLE,
+                sortino           DOUBLE,
+                mdd_pct           DOUBLE,
+                mdd_duration_days INTEGER,
+                mdd_recovery_days INTEGER,
+                calmar            DOUBLE,
+                win_rate          DOUBLE,
+                profit_factor     DOUBLE,
+                expectancy        DOUBLE,
+                cost_drag         DOUBLE,
+                ann_return        DOUBLE,
+                ann_vol           DOUBLE
+            )
+        """)
+
+        # ── Gold: immutable signal audit log ──────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS gold_signals (
+                signal_id   TEXT    NOT NULL PRIMARY KEY,
+                run_id      TEXT    NOT NULL,
+                ticker      TEXT    NOT NULL,
+                signal_date DATE    NOT NULL,
+                direction   INTEGER NOT NULL,
+                strength    DOUBLE,
+                signal_type TEXT,
+                computed_at TIMESTAMP DEFAULT now()
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_gs_run_date
+                ON gold_signals(run_id, signal_date, ticker)
+        """)
+
     finally:
         conn.close()
 
