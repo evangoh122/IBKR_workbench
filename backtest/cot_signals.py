@@ -130,6 +130,10 @@ def generate_cot_confluence_signals(
     using the most recent futures row on or before the COT report_date
     (VIX has no equity proxy and is excluded from this signal).
     """
+    # ASOF join: for each COT row, take the most recent futures row with
+    # trade_date <= report_date (point-in-time, no look-ahead).
+    # Threshold: zscore_ret_20 <= -3.0 preserves the original '-3s' intent
+    # (sigma_flag_ret_20 = '-3s' meant return z-score < -3).
     df = conn.execute("""
         SELECT
             c.report_date,
@@ -140,24 +144,21 @@ def generate_cot_confluence_signals(
             f.ticker        AS fut_ticker,
             f.zscore_ret_20
         FROM silver_cot_features c
-        JOIN (
-            SELECT ticker, trade_date, zscore_ret_20,
-                   ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY trade_date DESC) AS rn
-            FROM silver_futures_features
-            WHERE trade_date <= ?  -- report_date upper bound, passed as parameter
-        ) f ON f.ticker = CASE c.ticker
-            WHEN 'ES'  THEN 'ES1:COM'
-            WHEN 'NQ'  THEN 'NQ1:COM'
-            WHEN 'RTY' THEN 'RTY1:COM'
-            ELSE NULL
-        END AND f.rn = 1
+        ASOF JOIN silver_futures_features f
+            ON f.ticker = CASE c.ticker
+                WHEN 'ES'  THEN 'ES1:COM'
+                WHEN 'NQ'  THEN 'NQ1:COM'
+                WHEN 'RTY' THEN 'RTY1:COM'
+                ELSE NULL
+            END
+           AND f.trade_date <= c.report_date
         WHERE c.report_date BETWEEN ? AND ?
           AND c.crowd_flag = 'extreme_short'
           AND c.net_pos_zscore_52w IS NOT NULL
           AND f.zscore_ret_20 IS NOT NULL
-          AND f.zscore_ret_20 <= -2.0
+          AND f.zscore_ret_20 <= -3.0
         ORDER BY c.ticker, c.report_date
-    """, [end_date, start_date, end_date]).df()
+    """, [start_date, end_date]).df()
 
     signals: list[COTSignal] = []
     for row in df.to_dict("records"):
