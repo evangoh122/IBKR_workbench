@@ -311,6 +311,65 @@ def job_silver_futures():
     return n
 
 
+def job_walk_forward():
+    """
+    Walk-forward OOS backtest over silver_stock_features.
+
+    Env vars:
+        WF_UNIVERSE        comma-separated tickers (default: all configured tickers)
+        START_DATE / END_DATE   overall window (default: full silver history)
+        WF_N_SPLITS        number of OOS folds            (default 5)
+        WF_EMBARGO_DAYS    gap between IS end / OOS start (default 21)
+        WF_SPLIT_TYPE      'expanding' | 'rolling'        (default expanding)
+        WF_IS_WINDOW_DAYS  IS window length, rolling only
+        WF_ZSCORE_THRESHOLD / WF_MODE / WF_SIZING  -> BacktestEngine config
+    """
+    from datetime import date
+
+    from backtest.walk_forward import WalkForwardEngine
+    from db.database import DB_PATH
+
+    universe_env = os.getenv("WF_UNIVERSE", "")
+    universe = [s.strip().upper() for s in universe_env.split(",") if s.strip()]
+    if not universe:
+        universe = TICKER_SYMBOLS
+
+    start_s, end_s = POLYGON_START_DATE, POLYGON_END_DATE
+    if not (start_s and end_s):
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT MIN(trade_date), MAX(trade_date) FROM silver_stock_features"
+            ).fetchone()
+        if not row or row[0] is None:
+            logger.error("silver_stock_features is empty — run --job silver-stock first")
+            return
+        start_s = start_s or str(row[0])
+        end_s = end_s or str(row[1])
+
+    config = {
+        "zscore_threshold": float(os.getenv("WF_ZSCORE_THRESHOLD", "2.0")),
+        "mode": os.getenv("WF_MODE", "return"),
+        "sizing": os.getenv("WF_SIZING", "equal"),
+    }
+    is_window = os.getenv("WF_IS_WINDOW_DAYS", "")
+    wf = WalkForwardEngine(
+        db_path=DB_PATH,
+        config=config,
+        n_splits=int(os.getenv("WF_N_SPLITS", "5")),
+        embargo_days=int(os.getenv("WF_EMBARGO_DAYS", "21")),
+        split_type=os.getenv("WF_SPLIT_TYPE", "expanding"),
+        is_window_days=int(is_window) if is_window else None,
+    )
+    results = wf.run(
+        universe=universe,
+        start_date=date.fromisoformat(str(start_s)[:10]),
+        end_date=date.fromisoformat(str(end_s)[:10]),
+    )
+    logger.info(f"Walk-forward run {results.summary['run_id']} complete "
+                f"({results.summary['n_folds']} folds)")
+    return results
+
+
 def run_all(client: IBKRClient, refresh_chain: bool = False):
     if refresh_chain:
         logger.info("── Phase 1: Refreshing option chains ──")
@@ -343,6 +402,7 @@ def main():
                             "silver-cot",        # silver COT positioning features only
                             "silver-futures",    # silver futures price features only
                             "zscore-alerts",     # print current ±3σ breaches
+                            "walk-forward",      # walk-forward OOS backtest
                         ],
                         default="all")
     parser.add_argument("--schedule", action="store_true",
@@ -368,6 +428,10 @@ def main():
     if args.job == "silver-stock":
         from etl.silver_stock_features import main as _ssf_main
         _ssf_main()
+        return
+
+    if args.job == "walk-forward":
+        job_walk_forward()
         return
 
     if args.job == "zscore-alerts":

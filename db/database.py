@@ -626,9 +626,16 @@ def init_db():
                 universe    TEXT,
                 start_date  DATE NOT NULL,
                 end_date    DATE NOT NULL,
-                created_at  TIMESTAMP DEFAULT now()
+                created_at  TIMESTAMP DEFAULT now(),
+                fold_id     INTEGER            -- walk-forward OOS fold (NULL = plain run)
             )
         """)
+        # ── Migrate: add fold_id if the table predates walk-forward ───────────
+        try:
+            conn.execute("ALTER TABLE gold_backtest_runs ADD COLUMN fold_id INTEGER")
+            logger.info("Migrated gold_backtest_runs: added fold_id")
+        except Exception:
+            pass  # column already exists
 
         # ── Gold: individual simulated trades ─────────────────────────────────
         conn.execute("""
@@ -689,6 +696,22 @@ def init_db():
                 cost_drag         DOUBLE,
                 ann_return        DOUBLE,
                 ann_vol           DOUBLE
+            )
+        """)
+
+        # ── Gold: walk-forward OOS aggregate summary per walk-forward run ─────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS gold_oos_summary (
+                run_id TEXT NOT NULL,
+                run_ts TIMESTAMPTZ DEFAULT current_timestamp,
+                n_folds INTEGER,
+                mean_sharpe DOUBLE,
+                consistency_ratio DOUBLE,
+                combined_sharpe DOUBLE,
+                worst_fold_mdd DOUBLE,
+                split_type TEXT,
+                embargo_days INTEGER,
+                PRIMARY KEY (run_id)
             )
         """)
 
