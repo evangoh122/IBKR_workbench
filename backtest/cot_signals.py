@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 ZSCORE_EXTREME = 2.0        # |z| >= this -> extreme crowd position
 DIVERGENCE_THRESHOLD = 3.0  # spec_comm_divergence abs threshold
 
-# Index futures -> proxy equity ETF ticker used for the price-confluence check
-FUTURES_TO_EQUITY = {"ES": "SPY", "NQ": "QQQ", "RTY": "IWM"}
+# COT market ticker -> futures ticker used for the price-confluence check
+COT_TO_FUTURES = {"ES": "ES1:COM", "NQ": "NQ1:COM", "RTY": "RTY1:COM"}
 
 
 @dataclass
@@ -121,43 +121,43 @@ def generate_cot_confluence_signals(
     conn: duckdb.DuckDBPyConnection,
     start_date: date,
     end_date: date,
-    zscore_threshold: float = ZSCORE_EXTREME,
-    price_sigma_flag: str = "-3s",
 ) -> list[COTSignal]:
     """
     Signal B: COT + Price Confluence (LONG only for now).
-    Requires: COT crowd_flag = extreme_short AND the mapped proxy equity ETF's
-    sigma_flag_ret_20 = price_sigma_flag.
-    Maps ES->SPY, NQ->QQQ, RTY->IWM as proxy equity tickers for the price check
+    Requires: COT crowd_flag = extreme_short AND the mapped futures market's
+    zscore_ret_20 <= -2.0 (oversold at the index level).
+    Maps ES->ES1:COM, NQ->NQ1:COM, RTY->RTY1:COM in silver_futures_features,
+    using the most recent futures row on or before the COT report_date
     (VIX has no equity proxy and is excluded from this signal).
     """
-    mapping_values = ", ".join(
-        f"('{cot}', '{eq}')" for cot, eq in FUTURES_TO_EQUITY.items()
-    )
-
-    df = conn.execute(f"""
-        WITH mapping AS (
-            SELECT * FROM (VALUES {mapping_values}) AS m(cot_ticker, eq_ticker)
-        )
+    df = conn.execute("""
         SELECT
             c.report_date,
             c.ticker        AS cot_ticker,
             c.net_pos_zscore_52w,
             c.crowd_flag,
             c.spec_comm_divergence,
-            s.ticker        AS eq_ticker,
-            s.sigma_flag_ret_20
+            f.ticker        AS fut_ticker,
+            f.zscore_ret_20
         FROM silver_cot_features c
-        JOIN mapping m ON m.cot_ticker = c.ticker
-        JOIN silver_stock_features s
-            ON s.ticker = m.eq_ticker AND s.trade_date = c.report_date
+        JOIN (
+            SELECT ticker, trade_date, zscore_ret_20,
+                   ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY trade_date DESC) AS rn
+            FROM silver_futures_features
+            WHERE trade_date <= ?  -- report_date upper bound, passed as parameter
+        ) f ON f.ticker = CASE c.ticker
+            WHEN 'ES'  THEN 'ES1:COM'
+            WHEN 'NQ'  THEN 'NQ1:COM'
+            WHEN 'RTY' THEN 'RTY1:COM'
+            ELSE NULL
+        END AND f.rn = 1
         WHERE c.report_date BETWEEN ? AND ?
           AND c.crowd_flag = 'extreme_short'
           AND c.net_pos_zscore_52w IS NOT NULL
-          AND ABS(c.net_pos_zscore_52w) >= ?
-          AND s.sigma_flag_ret_20 = ?
+          AND f.zscore_ret_20 IS NOT NULL
+          AND f.zscore_ret_20 <= -2.0
         ORDER BY c.ticker, c.report_date
-    """, [start_date, end_date, zscore_threshold, price_sigma_flag]).df()
+    """, [end_date, start_date, end_date]).df()
 
     signals: list[COTSignal] = []
     for row in df.to_dict("records"):
@@ -167,6 +167,10 @@ def generate_cot_confluence_signals(
         fill = _next_monday(friday)
         if friday < start_date or friday > end_date:
             continue
+        logger.debug(
+            "cot_confluence: %s price check via %s (zscore_ret_20=%.2f)",
+            row["cot_ticker"], row["fut_ticker"], float(row["zscore_ret_20"]),
+        )
         signals.append(COTSignal(
             ticker=str(row["cot_ticker"]),
             signal_date=friday,

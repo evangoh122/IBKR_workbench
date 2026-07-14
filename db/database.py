@@ -610,7 +610,7 @@ def init_db():
                 f.vx_term_slope,
                 f.regime_flag
             FROM latest_cot c
-            LEFT JOIN latest_fut f ON c.ticker = f.ticker AND f.rn = 1
+            LEFT JOIN latest_fut f ON f.ticker = c.ticker || '1:COM' AND f.rn = 1
             WHERE c.rn = 1
             ORDER BY ABS(COALESCE(c.net_pos_zscore_52w, 0)) DESC
         """)
